@@ -10,6 +10,25 @@ import (
 	"time"
 )
 
+func TestExplicitPowerShellProfile(t *testing.T) {
+	for _, shell := range []string{"pwsh.exe", "powershell.exe"} {
+		t.Run(shell, func(t *testing.T) {
+			path, err := exec.LookPath(shell)
+			if err != nil {
+				t.Skip("shell is not installed")
+			}
+			_, argv, _, err := shellCommand([]string{path})
+			if err != nil || len(argv) != 4 || argv[3] != powershellPrompt {
+				t.Fatalf("profile did not install directory tracking: %q, %v", argv, err)
+			}
+			_, argv, _, err = shellCommand([]string{path, "-NoProfile"})
+			if err != nil || len(argv) != 2 || argv[1] != "-NoProfile" {
+				t.Fatalf("explicit arguments were changed: %q, %v", argv, err)
+			}
+		})
+	}
+}
+
 // TestCtrlC types Ctrl-C to a program in a pseudo console that a process
 // started as the server is, detached in a process group of its own, which
 // leaves it ignoring Ctrl-C. The program runs in the test's process again,

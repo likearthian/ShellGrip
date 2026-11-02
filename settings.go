@@ -13,6 +13,7 @@ import (
 // settings are the user's choices, kept in settings.json beside the
 // server's state.
 type settings struct {
+	DefaultProfile string `json:"defaultProfile,omitempty"`
 	// Appearance is "light", "dark", or "" to follow the system.
 	Appearance string  `json:"appearance,omitempty"`
 	FontSize   float32 `json:"fontSize,omitempty"`

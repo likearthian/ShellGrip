@@ -67,15 +67,15 @@ func (a *App) titleBar(c *ui.Context, k *colors) {
 	ui.Row(c).Height(titleH).Padding(0, max(bar.Right, 10), 0, left).Gap(14).AlignItems(ui.Center).DragWindow().Children(func() {
 		a.hostChip(c, k)
 		a.tabStrip(c, k)
+		ui.Row(c).Gap(0).AlignItems(ui.Center).Shrink(0).Children(func() {
+			a.newTabControls(c, k)
+		})
 		// The title bar between the tabs and the buttons, which drags the
 		// window, and a double click on which zooms it.
 		ui.Spacer(c).MinWidth(titleFree - 14)
 		ui.Row(c).Gap(2).AlignItems(ui.Center).Shrink(0).Children(func() {
 			if iconButton(c, k, "command", "Command Palette", 30, 17).Tooltip(tip("Command Palette", &cmdPalette)).Clicked() {
 				a.openPalette()
-			}
-			if iconButton(c, k, "plus", "New Tab", 30, 19).Tooltip(tip("New Tab", &cmdNewTab)).Clicked() {
-				a.newTab(a.currentDir())
 			}
 		})
 		a.windowControls(c, k)

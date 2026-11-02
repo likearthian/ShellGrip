@@ -70,6 +70,7 @@ type Pane struct {
 	// saved layout whose session was gone.
 	restored bool
 	startDir string
+	profile  terminalProfile
 }
 
 // App is the state of GoRex's window.
@@ -92,6 +93,8 @@ type App struct {
 	paletteQuery string
 	paletteSel   int
 	hostOpen     bool
+	profilesOpen bool
+	profiles     []terminalProfile
 	renaming     *Tab
 	renameText   string
 	renameFocus  bool
@@ -173,16 +176,21 @@ func (t *Tab) setFocus(p *Pane) {
 
 // newPane makes a pane with a new session in dir.
 func (a *App) newPane(dir string, cols, rows int) *Pane {
+	return a.newPaneWithProfile(dir, cols, rows, a.defaultProfile())
+}
+
+func (a *App) newPaneWithProfile(dir string, cols, rows int, profile terminalProfile) *Pane {
 	if cols <= 0 {
 		cols, rows = 80, 24
 	}
-	info, err := a.client.Create(rex.CreateOptions{Dir: dir, Cols: cols, Rows: rows})
+	command, launchDir := profile.launch(dir)
+	info, err := a.client.Create(rex.CreateOptions{Command: command, Dir: launchDir, Cols: cols, Rows: rows})
 	if err != nil {
 		log.Printf("creating a session: %v", err)
 		a.err = err.Error()
 		info = rex.SessionInfo{ID: "", Exited: true}
 	}
-	p := &Pane{ID: a.id(), SID: info.ID, info: info, startDir: dir}
+	p := &Pane{ID: a.id(), SID: info.ID, info: info, startDir: dir, profile: profile}
 	if p.info.Dir == "" {
 		p.info.Dir = dir
 	}
@@ -264,8 +272,12 @@ func (a *App) ring(p *Pane) {
 
 // newTab opens a tab with a shell in dir, after the active tab.
 func (a *App) newTab(dir string) *Tab {
+	return a.newTabWithProfile(dir, a.defaultProfile())
+}
+
+func (a *App) newTabWithProfile(dir string, profile terminalProfile) *Tab {
 	t := &Tab{ID: a.id()}
-	p := a.newPane(dir, 0, 0)
+	p := a.newPaneWithProfile(dir, 0, 0, profile)
 	t.Root = &Node{ID: a.id(), Pane: p}
 	p.Tab, p.Node = t, t.Root
 	t.setFocus(p)
@@ -280,6 +292,9 @@ func (a *App) newTab(dir string) *Tab {
 // currentDir returns the directory new panes open in: the focused pane's.
 func (a *App) currentDir() string {
 	if t := a.tab(); t != nil && t.Focus != nil {
+		if t.Focus.profile.WSL {
+			return t.Focus.startDir
+		}
 		if d := t.Focus.info.Dir; d != "" {
 			return d
 		}
@@ -306,7 +321,7 @@ func (a *App) split(vertical bool) {
 			cols = max(cols/2, 10)
 		}
 	}
-	p := a.newPane(a.currentDir(), cols, rows)
+	p := a.newPaneWithProfile(a.currentDir(), cols, rows, old.profile)
 	p.Tab = t
 	left := &Node{ID: a.id(), Pane: old, Parent: n}
 	right := &Node{ID: a.id(), Pane: p, Parent: n}
@@ -546,6 +561,9 @@ func (a *App) toggleZoom() {
 // program set, and the directory it works in.
 func (p *Pane) label() (name, detail string) {
 	in := p.info
+	if p.profile.WSL {
+		return p.profile.Name, shortDir(p.startDir)
+	}
 	prog := programOf(in.Program)
 	dir := shortDir(in.Dir)
 	if in.Program == "" {
@@ -658,14 +676,15 @@ type savedTab struct {
 }
 
 type savedNode struct {
-	SID      string     `json:"sid,omitempty"`
-	Dir      string     `json:"dir,omitempty"`
-	Cols     int        `json:"cols,omitempty"`
-	Rows     int        `json:"rows,omitempty"`
-	Vertical bool       `json:"vertical,omitempty"`
-	Ratio    float32    `json:"ratio,omitempty"`
-	A        *savedNode `json:"a,omitempty"`
-	B        *savedNode `json:"b,omitempty"`
+	SID      string          `json:"sid,omitempty"`
+	Profile  terminalProfile `json:"profile,omitzero"`
+	Dir      string          `json:"dir,omitempty"`
+	Cols     int             `json:"cols,omitempty"`
+	Rows     int             `json:"rows,omitempty"`
+	Vertical bool            `json:"vertical,omitempty"`
+	Ratio    float32         `json:"ratio,omitempty"`
+	A        *savedNode      `json:"a,omitempty"`
+	B        *savedNode      `json:"b,omitempty"`
 }
 
 func (a *App) snapshot() savedLayout {
@@ -673,8 +692,8 @@ func (a *App) snapshot() savedLayout {
 	var save func(n *Node) *savedNode
 	save = func(n *Node) *savedNode {
 		if p := n.Pane; p != nil {
-			s := &savedNode{SID: p.SID, Dir: p.info.Dir}
-			if s.Dir == "" {
+			s := &savedNode{SID: p.SID, Dir: p.info.Dir, Profile: p.profile}
+			if s.Dir == "" || p.profile.WSL {
 				s.Dir = p.startDir
 			}
 			if p.term != nil {
@@ -738,14 +757,14 @@ func (a *App) restore() bool {
 			var p *Pane
 			if in, ok := live[s.SID]; ok && !used[s.SID] {
 				used[s.SID] = true
-				p = &Pane{ID: a.id(), SID: s.SID, info: in, startDir: s.Dir}
+				p = &Pane{ID: a.id(), SID: s.SID, info: in, startDir: s.Dir, profile: s.Profile}
 				a.attach(p, in.Cols, in.Rows)
 			} else {
 				dir := s.Dir
-				if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+				if st, err := os.Stat(dir); !s.Profile.WSL && (err != nil || !st.IsDir()) {
 					dir, _ = os.UserHomeDir()
 				}
-				p = a.newPane(dir, s.Cols, s.Rows)
+				p = a.newPaneWithProfile(dir, s.Cols, s.Rows, s.Profile)
 				p.restored = true
 			}
 			p.Tab, p.Node = t, n

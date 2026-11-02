@@ -12,6 +12,12 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
   with its program's icon, name and directory in its header, and buttons to
   split right, split down, zoom and close. Drag the gaps between panes to
   resize them (double-click resets a split to half).
+- **Terminal profiles.** Click **+** to open the default terminal, or the
+  adjacent dropdown to choose an installed shell. Use the button beside a
+  profile to make it the saved default (marked with a check). Windows profiles
+  include PowerShell, Windows PowerShell, Command Prompt, Git Bash, and
+  registered WSL distributions. Splits and restarted panes keep their profile,
+  as do panes recreated after the session server restarts.
 - **Persistent sessions.** Shells run in a session server, a background
   process of the same binary (`GoRex -server`). Quit GoRex and everything
   keeps running; open it again and every tab, split and pane comes back as
@@ -94,6 +100,13 @@ prompt that sets it, wrapping the profile's own prompt: the header then
 follows it, and new panes open there. The window is frameless and its
 title bar draws minimize, maximize and close with the other buttons; it
 resizes from its sides and bottom, not its top.
+
+WSL profiles use `wsl.exe --distribution <name> --cd <directory>` inside
+ConPTY. WSL must already be installed with a registered Linux distribution;
+GoRex does not install one. Native Windows process inspection cannot see
+Linux foreground programs or directory changes, so WSL pane labels and new
+splits use the original launch directory. See Microsoft's
+[WSL command reference](https://learn.microsoft.com/en-us/windows/wsl/basic-commands).
 
 ## Layout
 

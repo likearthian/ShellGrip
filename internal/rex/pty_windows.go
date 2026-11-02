@@ -227,7 +227,12 @@ func shellCommand(cmd []string) (path string, argv []string, name string, err er
 		if err != nil {
 			return "", nil, "", err
 		}
-		return path, cmd, exeName(cmd[0]), nil
+		name = exeName(cmd[0])
+		argv = append([]string(nil), cmd...)
+		if len(argv) == 1 && (strings.EqualFold(name, "pwsh") || strings.EqualFold(name, "powershell")) {
+			argv = append(argv, "-NoExit", "-Command", powershellPrompt)
+		}
+		return path, argv, name, nil
 	}
 	for _, sh := range []string{os.Getenv("SHELL"), "pwsh.exe", "powershell.exe", os.Getenv("COMSPEC"), "cmd.exe"} {
 		if sh == "" {

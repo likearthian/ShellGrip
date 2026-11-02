@@ -89,6 +89,7 @@ func (a *App) open() {
 		a.err = "The session server is of another version of GoRex: quit and end all sessions to restart it."
 	}
 	a.reset()
+	a.profiles = discoverProfiles()
 	opts := mygo.WindowOptions{
 		Title:                "GoRex",
 		Width:                1000,
@@ -154,6 +155,7 @@ func (a *App) saveNow() {
 // connection, for the next window.
 func (a *App) reset() {
 	a.tabs, a.active, a.focusReq = nil, 0, nil
+	a.profilesOpen = false
 	a.paletteOpen, a.hostOpen, a.renaming = false, false, nil
 	a.saveDue, a.quitting, a.lastSnapshot, a.title = false, false, "", ""
 }
