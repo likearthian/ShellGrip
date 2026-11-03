@@ -42,19 +42,27 @@ func main() {
 	loadSettings()
 	a := &App{}
 	mygo.App.SetMenu(a.menu())
-	mygo.App.WhenReady(a.open)
+	mygo.App.WhenReady(func() {
+		a.open()
+		if a.win != nil {
+			a.createTray()
+		}
+	})
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
-		if !hasVisibleWindows && a.win == nil {
-			a.open()
+		if !hasVisibleWindows {
+			a.showWindow()
 		}
 	})
 	mygo.App.OnWindowAllClosed(func() {
-		if runtime.GOOS != "darwin" {
+		if runtime.GOOS != "darwin" && a.tray == nil {
 			mygo.App.Quit()
 		}
 	})
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
-		a.saveNow()
+	mygo.App.OnBeforeQuit(a.beforeQuit)
+	mygo.App.OnQuit(func() {
+		if a.tray != nil {
+			a.tray.Destroy()
+		}
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
@@ -99,7 +107,7 @@ func (a *App) open() {
 		StateKey:             "main",
 		TitleBarStyle:        mygo.TitleBarHidden,
 		TrafficLightPosition: &mygo.Point{X: 16, Y: 15},
-		BackgroundColor:      "light-dark(#efe1e6, #231e27)",
+		BackgroundColor:      "light-dark(#efe1e6, #292426)",
 		Content:              ui.View(a.view),
 	}
 	if ownControls {
@@ -115,6 +123,7 @@ func (a *App) open() {
 	a.changed()
 	go a.poll(win, client)
 	a.debugHook()
+	win.OnClose(a.beforeClose)
 	win.OnClosed(func() {
 		a.saveNow()
 		a.quitting = true
@@ -156,8 +165,16 @@ func (a *App) saveNow() {
 func (a *App) reset() {
 	a.tabs, a.active, a.focusReq = nil, 0, nil
 	a.profilesOpen = false
+	if a.themePreviewActive {
+		a.applyTerminalTheme(prefs.TerminalTheme)
+	}
+	a.quickThemeOpen, a.themePreviewActive = false, false
+	a.settingsCategory = ""
+	a.ctrlHeldAt, a.tabHints = time.Time{}, false
+	a.copiedCharacters = 0
 	a.paletteOpen, a.hostOpen, a.renaming = false, false, nil
 	a.saveDue, a.quitting, a.lastSnapshot, a.title = false, false, "", ""
+	a.exiting.Store(false)
 }
 
 // staleServer reports whether the server runs another build of the app

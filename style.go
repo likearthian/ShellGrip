@@ -3,8 +3,8 @@ package main
 import (
 	_ "embed"
 
-	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
+	"gorex/internal/terminal"
 )
 
 // colors are the app's own, in light and dark windows.
@@ -65,38 +65,38 @@ var lightColors = colors{
 }
 
 var darkColors = colors{
-	bgTop:    ui.Hex("#2c2131"),
-	bgMid:    ui.Hex("#231e27"),
-	bgLow:    ui.Hex("#221f22"),
-	bgBottom: ui.Hex("#2a2619"),
-	bgTint:   ui.RGBA(80, 40, 60, 0.25),
+	bgTop:    ui.Hex("#382d37"),
+	bgMid:    ui.Hex("#292426"),
+	bgLow:    ui.Hex("#2b2521"),
+	bgBottom: ui.Hex("#3b2f1d"),
+	bgTint:   ui.RGBA(25, 24, 28, 0.32),
 
-	card:              ui.RGBA(20, 20, 24, 0.5),
-	cardFocused:       ui.RGBA(36, 36, 41, 0.94),
-	cardBorder:        ui.RGBA(255, 255, 255, 0.05),
-	cardBorderFocused: ui.RGBA(255, 255, 255, 0.14),
-	shadow:            ui.RGBA(0, 0, 0, 0.25),
-	shadowFocused:     ui.RGBA(0, 0, 0, 0.4),
+	card:              ui.RGBA(25, 24, 24, 0.52),
+	cardFocused:       ui.RGBA(57, 51, 53, 0.38),
+	cardBorder:        ui.RGBA(211, 190, 173, 0.15),
+	cardBorderFocused: ui.RGBA(220, 198, 202, 0.23),
+	shadow:            ui.RGBA(12, 9, 10, 0.18),
+	shadowFocused:     ui.RGBA(12, 9, 10, 0.24),
 
-	text:      ui.Hex("#f2f2f7"),
-	textMuted: ui.Hex("#aeaeb2"),
-	textFaint: ui.Hex("#8e8e93"),
-	iconMuted: ui.Hex("#98989d"),
-	hover:     ui.RGBA(255, 255, 255, 0.08),
-	pressed:   ui.RGBA(255, 255, 255, 0.14),
+	text:      ui.Hex("#d3d0d3"),
+	textMuted: ui.Hex("#aaa5aa"),
+	textFaint: ui.Hex("#8b858b"),
+	iconMuted: ui.Hex("#827d83"),
+	hover:     ui.RGBA(231, 220, 228, 0.08),
+	pressed:   ui.RGBA(231, 220, 228, 0.14),
 
-	track:       ui.RGBA(255, 255, 255, 0.06),
-	trackBorder: ui.RGBA(255, 255, 255, 0.06),
-	tabActive:   ui.RGBA(255, 255, 255, 0.14),
-	tabSep:      ui.RGBA(255, 255, 255, 0.14),
-	tileRim:     ui.RGBA(255, 255, 255, 0.22),
+	track:       ui.RGBA(210, 195, 209, 0.08),
+	trackBorder: ui.RGBA(221, 209, 221, 0.04),
+	tabActive:   ui.RGBA(221, 209, 221, 0.13),
+	tabSep:      ui.RGBA(221, 209, 221, 0.13),
+	tileRim:     ui.RGBA(232, 220, 229, 0.24),
 
 	busy:      ui.Hex("#4ade80"),
 	attention: ui.Hex("#fbbf24"),
 	exited:    ui.Hex("#636366"),
 
-	panel:       ui.RGBA(38, 38, 42, 0.97),
-	panelBorder: ui.RGBA(255, 255, 255, 0.1),
+	panel:       ui.RGBA(43, 38, 43, 0.98),
+	panelBorder: ui.RGBA(220, 198, 202, 0.18),
 	panelSel:    ui.RGBA(108, 178, 255, 0.18),
 	backdrop:    ui.RGBA(0, 0, 0, 0.2),
 }
@@ -137,7 +137,7 @@ func registerFonts() {
 	}
 }
 
-var termFont = terminal.Font{Family: "JetBrains Mono, SF Mono, Menlo, monospace", Size: 11.6, LineHeight: 1.0}
+var termFont = terminal.Font{Family: terminalFontFamily(defaultFontFamily), Size: 11.6, LineHeight: 1.0}
 
 // The terminals' colors: soft ink on the panes' paper, and the dark kind.
 var lightTerm = &terminal.Theme{
@@ -154,14 +154,14 @@ var lightTerm = &terminal.Theme{
 }
 
 var darkTerm = &terminal.Theme{
-	Foreground: ui.Hex("#e6e6ea"),
-	Background: ui.Hex("#1e1e22"),
-	Cursor:     ui.Hex("#e6e6ea"),
+	Foreground: ui.Hex("#cecdcf"),
+	Background: ui.Hex("#252223"),
+	Cursor:     ui.Hex("#cecdcf"),
 	Selection:  ui.RGBA(108, 178, 255, 0.28),
 	Palette: [16]ui.Color{
-		ui.Hex("#3a3a40"), ui.Hex("#ff6b7f"), ui.Hex("#7bd88f"), ui.Hex("#e5c07b"),
-		ui.Hex("#6cb2ff"), ui.Hex("#c792ea"), ui.Hex("#56d4dd"), ui.Hex("#d0d0d6"),
-		ui.Hex("#6e6e78"), ui.Hex("#ff8c9c"), ui.Hex("#9be8a8"), ui.Hex("#f2d28a"),
-		ui.Hex("#8ec5ff"), ui.Hex("#d7a8f2"), ui.Hex("#7fe3ea"), ui.Hex("#ffffff"),
+		ui.Hex("#393536"), ui.Hex("#db656c"), ui.Hex("#36b66b"), ui.Hex("#c59b48"),
+		ui.Hex("#429cdb"), ui.Hex("#aa80c8"), ui.Hex("#19adb8"), ui.Hex("#cecdcf"),
+		ui.Hex("#817b80"), ui.Hex("#eb8487"), ui.Hex("#69c788"), ui.Hex("#ddbc75"),
+		ui.Hex("#78b5e4"), ui.Hex("#c3a1d9"), ui.Hex("#60c8cd"), ui.Hex("#eeecee"),
 	},
 }

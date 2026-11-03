@@ -23,7 +23,13 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
   keeps running; open it again and every tab, split and pane comes back as
   it was, programs still running. The server keeps each session's screen in
   a headless libghostty-vt emulator and sends a snapshot on attach, so
-  full-screen programs (lazygit, vim, htop…) come back exactly.
+  full-screen programs (lazygit, vim, htop…) come back exactly. Closing the
+  window hides GoRex to the system tray (the menu bar on macOS), without a
+  dialog. Click the tray icon to show the window; right-click for its menu
+  (click on macOS). **Quit GoRex (Keep Sessions)** leaves sessions running;
+  **Quit and End All Sessions** closes their programs and the server first.
+  If a tray is unavailable, closing the window uses the platform's normal
+  behavior and keeps sessions running.
 - **Program activity.** The server watches each terminal's foreground
   process (`tcgetpgrp`, `sysctl`, `proc_pidinfo`; on Windows, the shell's
   newest child, its command line and directory): headers and tabs name the
@@ -33,7 +39,8 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
   the window is in the background, a long command finishing posts a
   notification.
 - **Tab icons** stack the tiles of a tab's programs, the focused pane's in
-  front, as Rex does. Tabs reorder by dragging, rename by double-click, and
+  front, as Rex does. WSL panes use their distribution's icon and color,
+  with a Linux icon for unrecognized distributions. Tabs reorder by dragging, rename by double-click, and
   have a context menu.
 - **Host chip** with the machine's name and model; its popover shows the
   chip, memory, OS and the session server.
@@ -41,6 +48,29 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
   to jump to, fuzzy-matched.
 - Light and dark appearances (View ▸ Appearance), text size (⌘+ ⌘− ⌘0),
   JetBrains Mono embedded.
+- **Settings GUI.** Open the title-bar gear, View ▸ Settings, or Settings
+  in the command palette to choose appearance, terminal font family and size,
+  and the default terminal. Preview installed monospace fonts, then click
+  **Apply font** to update every open pane and save your choice. Other changes
+  apply and save automatically. **Reset font** restores bundled JetBrains Mono,
+  which also serves as the fallback if a saved font is unavailable.
+  Font size can be typed directly (8–32 pt, including decimals), or adjusted
+  with the −/+ buttons.
+  Under **Split panes**, **Highlight active pane** toggles the stronger active
+  border, Active label, and blended inactive backgrounds. It is enabled by
+  default, applies immediately, and saves automatically.
+- **Terminal themes.** Settings includes a searchable list of bundled Ghostty
+  themes, with a prompt preview and ANSI color swatches. Choosing a theme
+  updates every open pane and saves it for new sessions. Terminal colors are
+  independent of app appearance; choose **GoRex (follow appearance)** to restore
+  the original light/dark terminal colors.
+- **Copy on select.** Highlight terminal text and release the mouse to copy it
+  to the clipboard. Double-clicking a word or triple-clicking a line copies it
+  too. Enabled by default; turn it off under Settings ▸ Clipboard. While a
+  terminal program captures the mouse, hold Shift to select and copy text.
+  A brief toast in the top-right corner confirms how many characters were copied, including when
+  using the copy shortcut or context menu. Unicode text counts characters,
+  not encoded bytes; repeated copies update the same toast.
 
 ## Shortcuts
 
@@ -53,17 +83,23 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
 | ⌥⌘ arrows | Alt+arrows | Focus the pane in that direction |
 | ⌃⌘ arrows | Alt+Shift+arrows | Move the nearest divider |
 | ⌃⌘= | | Equalize panes |
-| ⌘1…⌘9, ⇧⌘[ ⇧⌘], ⌃Tab | Ctrl+Shift+1…9, Ctrl+PageUp/PageDown, Ctrl+Tab | Switch tabs |
+| ⌘1…⌘9, ⇧⌘[ ⇧⌘], ⌃Tab | Ctrl+1…9, Ctrl+0 (tab 10), Ctrl+PageUp/PageDown, Ctrl+Tab | Switch tabs |
 | ⇧⌘R | Ctrl+Shift+R | Rename tab |
 | ⇧⌘P, ⌘P | Ctrl+Shift+P | Command palette |
 | ⌘K | Ctrl+Shift+K | Clear |
-| ⌘+ ⌘− ⌘0 | Ctrl+= Ctrl+- Ctrl+0 | Text size |
+| ⌘+ ⌘− ⌘0 | Ctrl+= Ctrl+- Ctrl+Shift+0 | Text size |
 | ⌥⌘Q | | Quit and end all sessions |
 
 Elsewhere than on macOS, Control and a letter are the terminal's (Ctrl+C,
-Ctrl+D, Ctrl+W…), so GoRex's shortcuts take Shift too, as copying and
-pasting do (Ctrl+Shift+C, Ctrl+Shift+V), and none take Control and Alt,
+Ctrl+D, Ctrl+W…), so GoRex's shortcuts take Shift too, as copying does
+(Ctrl+Shift+C). Paste uses Ctrl+V; Ctrl+Shift+V also remains available.
+No shortcuts take Control and Alt,
 which type characters (AltGr) on many keyboards.
+
+Hold Ctrl for half a second to reveal number hints on the first ten tabs;
+release it to hide them. Ctrl+1–9 selects the corresponding tab, and Ctrl+0
+selects tab 10. Ctrl+Tab still cycles tabs. The previous Ctrl+Shift+1–9
+shortcuts remain available (Ctrl+Shift+9 selects the last tab).
 
 ## Develop and build
 
@@ -74,7 +110,7 @@ GoRex needs [Go](https://go.dev/dl/) 1.27+ and MyGo 0.3.0, whose CLI
 go tool mygo dev     # GoRex Dev, rebuilt and restarted as the code changes
 go test ./...        # the server, and the view without a window
 go tool mygo build   # build/darwin-arm64/GoRex.app and a .dmg
-go run ./tools/mkicon  # redraw resources/icon.png
+go run ./tools/mkicon  # copy the approved terminal logo to resources/icon.png
 ```
 
 `go get -tool github.com/egoist/mygo/cmd/mygo@latest` updates MyGo and its
@@ -96,16 +132,23 @@ data directory is `%AppData%\GoRex`. Panes run `$SHELL` when it names a
 Windows program (`nu`, `C:\Program Files\Git\bin\bash.exe`), else
 PowerShell (`pwsh`, then `powershell`), else `cmd`. PowerShell's `cd`
 leaves its process's directory where it was, so GoRex starts it with a
-prompt that sets it, wrapping the profile's own prompt: the header then
-follows it, and new panes open there. The window is frameless and its
+prompt that sets it and reports its location with OSC 7, wrapping the
+profile's own prompt: the header then follows it, and new panes open there.
+Windows file URIs are converted back to drive paths before launching a split.
+The window is frameless and its
 title bar draws minimize, maximize and close with the other buttons; it
 resizes from its sides and bottom, not its top.
 
 WSL profiles use `wsl.exe --distribution <name> --cd <directory>` inside
 ConPTY. WSL must already be installed with a registered Linux distribution;
-GoRex does not install one. Native Windows process inspection cannot see
-Linux foreground programs or directory changes, so WSL pane labels and new
-splits use the original launch directory. See Microsoft's
+GoRex does not install one. Opening WSL from a Windows shell starts in the
+Linux user's home directory (`~`). Splits use the source shell's current
+directory: shell-reported paths (OSC 7) when available, refreshed process
+inspection for native shells, and a session-tagged Linux process lookup for
+WSL. WSL sessions opened before this feature need a new tab for directory
+lookup; when lookup is unavailable, splits retain the last known directory.
+Native Windows process inspection cannot see Linux foreground programs.
+See Microsoft's
 [WSL command reference](https://learn.microsoft.com/en-us/windows/wsl/basic-commands).
 
 ## Layout

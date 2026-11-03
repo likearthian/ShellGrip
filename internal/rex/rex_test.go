@@ -12,6 +12,22 @@ import (
 	"time"
 )
 
+func TestSessionEnvironmentOverrides(t *testing.T) {
+	t.Setenv("WSLENV", "EDITOR/u")
+	count := 0
+	for _, value := range sessionEnv("test-session", []string{"WSLENV=EDITOR/u:GOREX_SESSION"}) {
+		if strings.HasPrefix(value, "WSLENV=") {
+			count++
+			if value != "WSLENV=EDITOR/u:GOREX_SESSION" {
+				t.Fatalf("old environment value was retained: %q", value)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("WSLENV appears %d times", count)
+	}
+}
+
 func TestServer(t *testing.T) {
 	// A short path, for the socket: macOS's temporary directory is long.
 	base, shell, work := "/tmp", "/bin/sh", "/tmp"

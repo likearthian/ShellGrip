@@ -13,17 +13,18 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
+	"gorex/internal/terminal"
 
 	"gorex/internal/rex"
 )
 
 // Tab is a tab of the window: panes in a tree of splits.
 type Tab struct {
-	ID   int
-	Name string // the name the user gave it, "" to follow its panes
-	Root *Node
+	ID       int
+	Settings bool
+	Name     string // the name the user gave it, "" to follow its panes
+	Root     *Node
 	// Focus is the pane with the focus, and Zoom the pane that fills the
 	// tab, when one does.
 	Focus *Pane
@@ -76,6 +77,7 @@ type Pane struct {
 // App is the state of GoRex's window.
 type App struct {
 	win    *mygo.Window
+	tray   *mygo.Tray
 	client *rex.Client
 	hello  rex.Hello
 	err    string
@@ -89,21 +91,43 @@ type App struct {
 	focusReq *Pane
 
 	// The command palette, the host's popover and the tab being renamed.
-	paletteOpen  bool
-	paletteQuery string
-	paletteSel   int
-	hostOpen     bool
-	profilesOpen bool
-	profiles     []terminalProfile
-	renaming     *Tab
-	renameText   string
-	renameFocus  bool
-	saveDue      bool
-	lastSave     time.Time
-	quitting     bool
-	focusedWin   bool
-	lastSnapshot string
-	title        string
+	paletteOpen        bool
+	paletteQuery       string
+	paletteSel         int
+	hostOpen           bool
+	profilesOpen       bool
+	settingsCategory   string
+	shortcutQuery      string
+	shortcutEditing    *command
+	shortcutDraft      string
+	shortcutError      string
+	settingsProfile    string
+	settingsFont       string
+	settingsFontSize   string
+	fontFamilies       []string
+	fontHighlight      string
+	quickThemeOpen     bool
+	quickThemeQuery    string
+	themePreview       string
+	themePreviewActive bool
+	themePickerOpen    bool
+	themeQuery         string
+	themeNames         []string
+	profiles           []terminalProfile
+	renaming           *Tab
+	renameText         string
+	renameFocus        bool
+	saveDue            bool
+	lastSave           time.Time
+	quitting           bool
+	// exiting lets an explicit quit close the window instead of hiding it.
+	exiting          atomic.Bool
+	focusedWin       bool
+	lastSnapshot     string
+	title            string
+	ctrlHeldAt       time.Time
+	tabHints         bool
+	copiedCharacters int
 
 	// posted are changes to make in the next frame, from terminals of a
 	// view without a window, as in tests.
@@ -180,11 +204,12 @@ func (a *App) newPane(dir string, cols, rows int) *Pane {
 }
 
 func (a *App) newPaneWithProfile(dir string, cols, rows int, profile terminalProfile) *Pane {
+	dir = profile.startingDir(dir)
 	if cols <= 0 {
 		cols, rows = 80, 24
 	}
 	command, launchDir := profile.launch(dir)
-	info, err := a.client.Create(rex.CreateOptions{Command: command, Dir: launchDir, Cols: cols, Rows: rows})
+	info, err := a.client.Create(rex.CreateOptions{Command: command, Dir: launchDir, Env: profile.environment(), Cols: cols, Rows: rows})
 	if err != nil {
 		log.Printf("creating a session: %v", err)
 		a.err = err.Error()
@@ -201,7 +226,7 @@ func (a *App) newPaneWithProfile(dir string, cols, rows int, profile terminalPro
 // attach makes the pane's terminal, attached to its session.
 func (a *App) attach(p *Pane, cols, rows int) {
 	if p.SID == "" {
-		term, err := terminal.New(terminal.Options{Conn: nopConn{}, Transparent: true, Font: termFont, Theme: lightTerm, DarkTheme: darkTerm})
+		term, err := terminal.New(terminal.Options{Conn: nopConn{}, Transparent: true, CopyOnSelect: prefs.CopyOnSelect, OnCopySelection: a.selectionCopied, Font: termFont, Theme: terminalLight, DarkTheme: terminalDark})
 		if err == nil {
 			term.Feed([]byte("\x1b[31mCould not start a session: " + a.err + "\x1b[0m\r\n"))
 			p.term = term
@@ -221,11 +246,13 @@ func (a *App) attach(p *Pane, cols, rows int) {
 		}
 	}
 	term, err := terminal.New(terminal.Options{
-		Conn:        p.stream,
-		Font:        termFont,
-		Theme:       lightTerm,
-		DarkTheme:   darkTerm,
-		Transparent: true,
+		Conn:            p.stream,
+		Font:            termFont,
+		Theme:           terminalLight,
+		DarkTheme:       terminalDark,
+		Transparent:     true,
+		CopyOnSelect:    prefs.CopyOnSelect,
+		OnCopySelection: a.selectionCopied,
 		OnTitle: func(title string) {
 			update(func() { p.title = title })
 		},
@@ -292,10 +319,7 @@ func (a *App) newTabWithProfile(dir string, profile terminalProfile) *Tab {
 // currentDir returns the directory new panes open in: the focused pane's.
 func (a *App) currentDir() string {
 	if t := a.tab(); t != nil && t.Focus != nil {
-		if t.Focus.profile.WSL {
-			return t.Focus.startDir
-		}
-		if d := t.Focus.info.Dir; d != "" {
+		if d := t.Focus.directory(); d != "" {
 			return d
 		}
 	}
@@ -321,7 +345,7 @@ func (a *App) split(vertical bool) {
 			cols = max(cols/2, 10)
 		}
 	}
-	p := a.newPaneWithProfile(a.currentDir(), cols, rows, old.profile)
+	p := a.newPaneWithProfile(a.splitDirectory(old), cols, rows, old.profile)
 	p.Tab = t
 	left := &Node{ID: a.id(), Pane: old, Parent: n}
 	right := &Node{ID: a.id(), Pane: p, Parent: n}
@@ -522,7 +546,7 @@ func (a *App) resizeFocused(dx, dy int) {
 // either side.
 func (a *App) equalize() {
 	t := a.tab()
-	if t == nil {
+	if t == nil || t.Settings {
 		return
 	}
 	var walk func(n *Node) (cols, rows int)
@@ -562,7 +586,7 @@ func (a *App) toggleZoom() {
 func (p *Pane) label() (name, detail string) {
 	in := p.info
 	if p.profile.WSL {
-		return p.profile.Name, shortDir(p.startDir)
+		return p.profile.Name, shortDir(p.directory())
 	}
 	prog := programOf(in.Program)
 	dir := shortDir(in.Dir)
@@ -652,6 +676,9 @@ func samePath(a, b string) bool {
 
 // tabLabel names a tab: its name, or its focused pane's.
 func (t *Tab) label() (name, detail string) {
+	if t.Settings {
+		return "Settings", ""
+	}
 	if t.Name != "" {
 		return t.Name, ""
 	}
@@ -688,14 +715,11 @@ type savedNode struct {
 }
 
 func (a *App) snapshot() savedLayout {
-	l := savedLayout{Active: a.active}
+	l := savedLayout{}
 	var save func(n *Node) *savedNode
 	save = func(n *Node) *savedNode {
 		if p := n.Pane; p != nil {
-			s := &savedNode{SID: p.SID, Dir: p.info.Dir, Profile: p.profile}
-			if s.Dir == "" || p.profile.WSL {
-				s.Dir = p.startDir
-			}
+			s := &savedNode{SID: p.SID, Dir: p.directory(), Profile: p.profile}
 			if p.term != nil {
 				s.Cols, s.Rows = p.term.Size()
 			}
@@ -703,7 +727,13 @@ func (a *App) snapshot() savedLayout {
 		}
 		return &savedNode{Vertical: n.Vertical, Ratio: n.Ratio, A: save(n.A), B: save(n.B)}
 	}
-	for _, t := range a.tabs {
+	for i, t := range a.tabs {
+		if t.Settings {
+			continue
+		}
+		if i <= a.active {
+			l.Active = len(l.Tabs)
+		}
 		st := savedTab{Name: t.Name, Root: save(t.Root), Zoom: t.Zoom != nil}
 		st.Focus = max(slices.Index(t.panes(), t.Focus), 0)
 		l.Tabs = append(l.Tabs, st)
@@ -757,10 +787,10 @@ func (a *App) restore() bool {
 			var p *Pane
 			if in, ok := live[s.SID]; ok && !used[s.SID] {
 				used[s.SID] = true
-				p = &Pane{ID: a.id(), SID: s.SID, info: in, startDir: s.Dir, profile: s.Profile}
+				p = &Pane{ID: a.id(), SID: s.SID, info: in, startDir: s.Profile.startingDir(s.Dir), profile: s.Profile}
 				a.attach(p, in.Cols, in.Rows)
 			} else {
-				dir := s.Dir
+				dir := s.Profile.startingDir(s.Dir)
 				if st, err := os.Stat(dir); !s.Profile.WSL && (err != nil || !st.IsDir()) {
 					dir, _ = os.UserHomeDir()
 				}

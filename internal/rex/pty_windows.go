@@ -251,13 +251,14 @@ func shellCommand(cmd []string) (path string, argv []string, name string, err er
 }
 
 // powershellPrompt makes PowerShell's prompt set the process's directory
-// to its location, which cd changes alone: the server then finds where it
-// is as it does for other shells. $? stays as the command left it, for the
+// to its location, which cd changes alone, and reports it with OSC 7 so
+// splits can use it without process inspection. $? stays as the command left it, for the
 // prompt of the profile, which runs first.
 const powershellPrompt = `$global:__GoRexPrompt = $function:prompt; ` +
 	`function global:prompt { $ok = $global:?; ` +
 	`try { $l = $executionContext.SessionState.Path.CurrentLocation; ` +
-	`if ($l.Provider.Name -eq 'FileSystem') { [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; ` +
+	`if ($l.Provider.Name -eq 'FileSystem') { [Environment]::CurrentDirectory = $l.ProviderPath; ` +
+	`[Console]::Write(([char]27) + ']7;' + ([uri]$l.ProviderPath).AbsoluteUri + ([char]7)) } } catch {}; ` +
 	`if (-not $ok) { Write-Error '' -ErrorAction Ignore }; & $global:__GoRexPrompt }`
 
 // processAlive reports whether a process runs.

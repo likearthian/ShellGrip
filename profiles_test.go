@@ -9,15 +9,25 @@ import (
 
 func TestProfileLaunch(t *testing.T) {
 	profile := terminalProfile{ID: "wsl:Ubuntu", Name: "Ubuntu (WSL)", Command: []string{"wsl.exe", "--distribution", "Ubuntu"}, WSL: true}
-	for _, dir := range []string{`C:\Users\Test User\project`, "/home/user/project with spaces", ""} {
-		command, hostDir := profile.launch(dir)
-		wantDir := dir
-		if wantDir == "" {
-			wantDir = "~"
-		}
-		want := []string{"wsl.exe", "--distribution", "Ubuntu", "--cd", wantDir}
+	for _, test := range []struct{ dir, want string }{
+		{`C:\Users\Test User`, "~"},
+		{`C:\Users\Test User\project`, "~"},
+		{"C:/Users/Test User", "~"},
+		{`\\server\share`, "~"},
+		{"//server/share", "~"},
+		{"/home/user/project with spaces", "/home/user/project with spaces"},
+		{"/mnt/c/project", "/mnt/c/project"},
+		{"/", "/"},
+		{"~", "~"},
+		{"", "~"},
+	} {
+		command, hostDir := profile.launch(test.dir)
+		want := []string{"wsl.exe", "--distribution", "Ubuntu", "--cd", test.want}
 		if !reflect.DeepEqual(command, want) {
-			t.Fatalf("launch(%q) = %q, want %q", dir, command, want)
+			t.Fatalf("launch(%q) = %q, want %q", test.dir, command, want)
+		}
+		if got := profile.startingDir(test.dir); got != test.want {
+			t.Fatalf("saved launch directory = %q, want %q", got, test.want)
 		}
 		home, _ := os.UserHomeDir()
 		if hostDir != home {
@@ -26,6 +36,10 @@ func TestProfileLaunch(t *testing.T) {
 	}
 	if len(profile.Command) != 3 {
 		t.Fatal("launch changed the saved profile command")
+	}
+	native := terminalProfile{Command: []string{"cmd.exe"}}
+	if got := native.startingDir(`C:\Users\Test User`); got != `C:\Users\Test User` {
+		t.Fatalf("native shell directory changed to %q", got)
 	}
 }
 

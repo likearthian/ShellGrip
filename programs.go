@@ -120,6 +120,38 @@ func programOf(name string) program {
 	return p
 }
 
+// WSL's host process cannot identify the Linux foreground program, so its
+// tile follows the distribution recorded in the terminal profile.
+func wslProgram(distro string) program {
+	name := strings.ToLower(distro)
+	glyph, color := "linux", "#242424"
+	for _, d := range []struct {
+		prefix, glyph, color string
+	}{
+		{"ubuntu", "ubuntu", "#e95420"},
+		{"debian", "debian", "#a81d33"},
+		{"kali", "kalilinux", "#557c94"},
+		{"arch", "archlinux", "#1793d1"},
+		{"fedora", "fedora", "#294172"},
+		{"opensuse", "opensuse", "#73ba25"},
+		{"suse", "opensuse", "#73ba25"},
+		{"alpine", "alpinelinux", "#0d597f"},
+		{"linuxmint", "linuxmint", "#537d31"},
+		{"mint", "linuxmint", "#537d31"},
+		{"rocky", "rockylinux", "#10b981"},
+		{"alma", "almalinux", "#164080"},
+	} {
+		if strings.HasPrefix(name, d.prefix) {
+			glyph, color = d.glyph, d.color
+			break
+		}
+	}
+	return program{
+		Name: distro, Glyph: "brand:" + glyph, Shell: true,
+		TileBg: ui.Hex(color), TileFg: ui.Hex("#ffffff"),
+	}
+}
+
 // hashColor picks a color for a name, the same every time.
 func hashColor(s string) ui.Color {
 	palette := []string{"#6d5bd0", "#2f80ed", "#0f9d8a", "#d9822b", "#c2417d", "#3a7d44", "#8a5a44", "#4e5d94"}

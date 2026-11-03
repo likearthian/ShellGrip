@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -12,13 +11,33 @@ import (
 )
 
 const (
-	tabH     = 28
-	tabMaxW  = 214
-	tabMinW  = 120
-	tileW    = 21
-	tileH    = 16
-	tileStep = 5 // how far each tile behind peeks out
+	tabH         = 28
+	tabMaxW      = 214
+	tabMinW      = 120
+	tileW        = 21
+	tileH        = 16
+	tileStep     = 5 // how far each tile behind peeks out
+	tabHintDelay = 500 * time.Millisecond
 )
+
+func (a *App) updateTabHints(c *ui.Context) {
+	held := c.Modifiers() == ui.Ctrl && a.focusedWin && !a.paletteOpen && a.renaming == nil
+	a.tabHintState(c.Now(), held)
+	if held && !a.tabHints {
+		c.After(tabHintDelay - c.Now().Sub(a.ctrlHeldAt))
+	}
+}
+
+func (a *App) tabHintState(now time.Time, held bool) {
+	if !held {
+		a.ctrlHeldAt, a.tabHints = time.Time{}, false
+		return
+	}
+	if a.ctrlHeldAt.IsZero() {
+		a.ctrlHeldAt = now
+	}
+	a.tabHints = now.Sub(a.ctrlHeldAt) >= tabHintDelay
+}
 
 // tabStrip draws the tabs, in a track as wide as they are, which shrinks
 // with them when the title bar has no room for them all. The track is part
@@ -53,7 +72,7 @@ func (a *App) tabStrip(c *ui.Context, k *colors) {
 func tabWidth(c *ui.Context, t *Tab) float32 {
 	name, detail := t.label()
 	w, _ := c.MeasureText(0, tabLabel(name, detail, ui.Color{}, ui.Color{})...)
-	tiles := float32(tileW + tileStep*min(len(t.panes())-1, 2) + 2)
+	tiles := float32(tileW + tileStep*min(max(len(t.panes())-1, 0), 2) + 2)
 	return min(max(6+tiles+9+w+9+18+10, tabMinW), tabMaxW)
 }
 
@@ -78,6 +97,9 @@ func (a *App) tabItem(c *ui.Context, k *colors, i int, t *Tab, width float32) {
 	e.Label(name + " " + detail)
 	if active {
 		e.Background(k.tabActive).Shadow(0, 1, 2, 0, k.shadow).Shadow(0, 2, 8, 0, k.shadow)
+		if c.Theme().Dark {
+			e.Border(1, k.cardBorderFocused)
+		}
 	} else if e.Hovered() {
 		e.Background(k.hover)
 	}
@@ -104,7 +126,19 @@ func (a *App) tabItem(c *ui.Context, k *colors, i int, t *Tab, width float32) {
 	// shows then.
 	hovered := e.Hovered()
 	e.Children(func() {
-		a.tiles(c, k, t)
+		if a.tabHints && i < len(tabNumberCommands) && tabNumberCommands[i].binding() != (shortcut{}) {
+			number := (i + 1) % 10
+			binding := tabNumberCommands[i].binding()
+			w := float32(tileW + tileStep*min(max(len(t.panes())-1, 0), 2) + 2)
+			ui.Box(c).Size(w, tileH+4).Shrink(0).Center().Radius(4).Background(k.panelSel).Border(1, k.textFaint).
+				Label("Tab shortcut " + binding.String()).Children(func() {
+				ui.Text(c, fmt.Sprint(number)).FontSize(13).FontWeight(700).TextColor(k.text)
+			})
+		} else if t.Settings {
+			ui.Icon(c, icon("settings-2")).Size(tileW+2, tileH+4).TextColor(k.textMuted)
+		} else {
+			a.tiles(c, k, t)
+		}
 		if a.renaming == t {
 			a.renameField(c, t, name)
 			return
@@ -117,7 +151,7 @@ func (a *App) tabItem(c *ui.Context, k *colors, i int, t *Tab, width float32) {
 		label.Draw(func(p *ui.Painter, r ui.Rect) {
 			fadeText(p, r, tabLabel(name, detail, nameColor, detailColor))
 		})
-		if hovered && len(a.tabs) > 1 {
+		if (hovered && len(a.tabs) > 1) || t.Settings {
 			x := iconButton(c, k, "x", "Close Tab", 18, 12).Tooltip("Close Tab")
 			if x.Clicked() {
 				a.later(c, func() { a.closeTab(t) })
@@ -186,6 +220,12 @@ func (a *App) moveTab(t *Tab, to int) {
 }
 
 func (a *App) tabMenu(m *ui.Menu, t *Tab) {
+	if t.Settings {
+		if m.Item("Close Settings").Chosen() {
+			a.laterService(func() { a.closeTab(t) })
+		}
+		return
+	}
 	if m.Item("Rename Tab…").Chosen() {
 		a.selectTab(slices.Index(a.tabs, t))
 		a.startRename()
@@ -203,11 +243,8 @@ func (a *App) tabMenu(m *ui.Menu, t *Tab) {
 		a.moveTab(t, i+1)
 	}
 	m.Separator()
-	mods, key := ui.Cmd, ui.KeyT
-	if runtime.GOOS != "darwin" {
-		mods, key = cmdNewTab.Other.Mods, cmdNewTab.Other.Key
-	}
-	if m.Item("New Tab").Shortcut(mods, key).Chosen() {
+	binding := cmdNewTab.binding()
+	if m.Item("New Tab").Shortcut(binding.Mods, binding.Key).Chosen() {
 		a.newTab(a.currentDir())
 	}
 	if m.Item("Close Tab").Chosen() {
@@ -253,6 +290,9 @@ func (a *App) tiles(c *ui.Context, k *colors, t *Tab) {
 }
 
 func paneProgram(p *Pane) program {
+	if p.profile.WSL {
+		return wslProgram(strings.TrimPrefix(p.profile.ID, "wsl:"))
+	}
 	if p.info.Idle || p.info.Program == "" {
 		return programOf(p.info.Shell)
 	}

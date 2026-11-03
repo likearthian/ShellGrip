@@ -7,12 +7,14 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/egoist/mygo/plugins/terminal"
+	"gorex/internal/terminal"
 )
 
 // scrollback is about how many bytes of output a session keeps above its
@@ -166,7 +168,15 @@ func sessionEnv(id string, extra []string) []string {
 	if !hasLang {
 		env = append(env, "LANG=en_US.UTF-8")
 	}
-	return append(env, extra...)
+	for _, value := range extra {
+		key, _, _ := strings.Cut(value, "=")
+		env = slices.DeleteFunc(env, func(existing string) bool {
+			name, _, _ := strings.Cut(existing, "=")
+			return name == key || runtime.GOOS == "windows" && strings.EqualFold(name, key)
+		})
+		env = append(env, value)
+	}
+	return env
 }
 
 func (s *session) read() {

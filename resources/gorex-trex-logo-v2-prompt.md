@@ -1,0 +1,6 @@
+Generated using the built-in image_gen tool.
+
+Reference inputs: gorex-trex-logo-v1.png (edit target); Superlogical rex-icon.png (style reference).
+
+Prompt:
+Use case: logo-brand. Edit the GoRex mascot logo in image 1; image 2 is a visual style reference only. Redesign image 1 completely into a much simpler premium app mascot mark: just a cute T-rex head and short neck in side profile facing right, generous rounded snout, three softly rounded small back spikes, one dark oval eye, a tiny friendly smile. Give GoRex its own distinct silhouette and terminal identity. Incorporate a small dark-plum >_ terminal prompt naturally on the lower neck, crisp and legible, without a separate terminal window. Use an elegant smooth warm gradient across the dinosaur, sunshine yellow at the top of the snout through orange and coral into pink and lavender at the neck. Borderless clean silhouette, subtle soft volume, no thick black outline. Reference image 2 only for simplicity, friendly minimal facial features and gradient finish; do not reproduce its exact silhouette or beta badge. Compact balanced square composition, centered with 12 percent clear padding. Actual transparent background. No rounded app tile, no badge, no wordmark, no text except the >_ symbol, no body, arms, feet, computer, scenery, or shadow outside the silhouette. Produce one finished logo, not a sheet.

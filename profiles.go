@@ -25,11 +25,9 @@ func (a *App) defaultProfile() terminalProfile {
 }
 
 func (p terminalProfile) launch(dir string) ([]string, string) {
+	dir = p.startingDir(dir)
 	command := append([]string(nil), p.Command...)
 	if p.WSL {
-		if dir == "" {
-			dir = "~"
-		}
 		command = append(command, "--cd", dir)
 		// CreateProcess needs a Windows directory, even for a Linux path.
 		dir, _ = os.UserHomeDir()
@@ -37,6 +35,18 @@ func (p terminalProfile) launch(dir string) ([]string, string) {
 		dir, _ = os.UserHomeDir()
 	}
 	return command, dir
+}
+
+// Windows directories belong to the host shell. A WSL profile starts in
+// Linux home unless it inherits an absolute Linux directory from WSL.
+func (p terminalProfile) startingDir(dir string) string {
+	if !p.WSL {
+		return nativeDirectory(dir)
+	}
+	if p.WSL && (dir == "" || !strings.HasPrefix(dir, "/") || strings.HasPrefix(dir, "//")) {
+		return "~"
+	}
+	return dir
 }
 
 func (a *App) newTabControls(c *ui.Context, k *colors) {

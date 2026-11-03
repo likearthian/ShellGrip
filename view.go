@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
+	"gorex/internal/terminal"
 )
 
 const (
@@ -22,6 +22,7 @@ func (a *App) view(c *ui.Context) {
 	a.runPosted()
 	k := colorsOf(c)
 	a.focusedWin = a.win == nil || a.win.IsFocused()
+	a.updateTabHints(c)
 	c.Root().Background(k.bgBottom)
 	ui.Column(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) { paintBackground(p, r, k) }).Children(func() {
 		a.titleBar(c, k)
@@ -36,6 +37,8 @@ func (a *App) view(c *ui.Context) {
 	}
 	a.shortcuts(c)
 	a.palette(c, k)
+	a.showCopyToast(c)
+	a.toastViewport(c, k)
 	if a.saveDue && time.Since(a.lastSave) > time.Second {
 		a.save()
 	}
@@ -74,6 +77,10 @@ func (a *App) titleBar(c *ui.Context, k *colors) {
 		// window, and a double click on which zooms it.
 		ui.Spacer(c).MinWidth(titleFree - 14)
 		ui.Row(c).Gap(2).AlignItems(ui.Center).Shrink(0).Children(func() {
+			a.quickThemeButton(c, k)
+			if iconButton(c, k, "settings-2", "Settings", 30, 17).Tooltip("Settings").Clicked() {
+				a.openSettings()
+			}
 			if iconButton(c, k, "command", "Command Palette", 30, 17).Tooltip(tip("Command Palette", &cmdPalette)).Clicked() {
 				a.openPalette()
 			}
@@ -132,10 +139,10 @@ var closeRed = ui.Hex("#c42b1c")
 // tip is the tooltip of a button that runs a command: its label and its
 // keys.
 func tip(label string, cmd *command) string {
-	if cmd.Keys == "" {
+	if cmd.shortcutLabel() == "" {
 		return label
 	}
-	return label + "  " + cmd.Keys
+	return label + "  " + cmd.shortcutLabel()
 }
 
 // iconButton is a borderless button of an icon, with a face on hover;
@@ -160,6 +167,10 @@ func iconButton(c *ui.Context, k *colors, name, label string, size, iconSize flo
 
 // tabContent lays out the panes of a tab, or the one zoomed.
 func (a *App) tabContent(c *ui.Context, k *colors, t *Tab) {
+	if t.Settings {
+		a.settingsPanel(c, k)
+		return
+	}
 	if t.Zoom != nil {
 		a.paneCard(c, k, t, t.Zoom).Grow(1)
 		return
@@ -228,14 +239,37 @@ func (a *App) paneCard(c *ui.Context, k *colors, t *Tab, p *Pane) ui.Element {
 	if focused {
 		bg, border, shadow = k.cardFocused, k.cardBorderFocused, k.shadowFocused
 	}
+	if prefs.PaneFocusCues {
+		bg = k.bgTop
+		if focused {
+			bg, border = k.cardFocused, ui.Hex("#a18aa6")
+			if c.Theme().Dark {
+				bg, border = ui.Hex("#403540"), ui.RGBA(220, 198, 222, 0.65)
+			}
+		}
+	}
 	card.Background(bg).Border(1, border).
 		Shadow(0, 1, 2, 0, shadow).
-		Shadow(0, 6, 22, -2, shadow)
+		Shadow(0, 4, 14, -2, shadow)
+	if c.Theme().Dark && focused {
+		card.Draw(func(p *ui.Painter, r ui.Rect) {
+			p.FillGradient(r, ui.LinearGradient{
+				From:  ui.RGBA(235, 215, 230, 0.06),
+				To:    ui.RGBA(235, 215, 230, 0),
+				Angle: 180, End: 0.14,
+			}, cardR)
+		})
+	}
 	card.Transition(ui.ElementTransition{Colors: true, Duration: 160 * time.Millisecond})
 	hovered := card.Hovered()
 	card.Children(func() {
 		a.paneHeader(c, k, t, p, focused, hovered)
-		body := ui.Box(c).Grow(1).MinHeight(0).Padding(0, 5, 6, 5)
+		body := ui.Box(c).Grow(1).MinHeight(0).Padding(2, 5, 8, 5)
+		// Inactive panes share one uninterrupted surface with their header.
+		// Only the input target gets a distinct terminal background.
+		if (prefs.PaneFocusCues && focused) || (!prefs.PaneFocusCues && a.activeTerminalThemeName() != "") {
+			body.Background(terminalThemeFor(c.Theme().Dark).Background)
+		}
 		body.Children(func() {
 			if p.term == nil {
 				return
@@ -284,10 +318,14 @@ func (a *App) paneHeader(c *ui.Context, k *colors, t *Tab, p *Pane, focused, hov
 		ui.Row(c).Grow(1).MinWidth(0).Gap(5).AlignItems(ui.Center).ClipX().Children(func() {
 			ui.Text(c, name).FontSize(12.5).FontWeight(600).TextColor(k.text).SingleLine().Ellipsis("…").Shrink(0).MaxWidthPercent(80)
 			if detail != "" {
-				ui.Text(c, detail).FontSize(12.5).FontWeight(500).TextColor(k.text.Alpha(0.86)).SingleLine().Ellipsis("…").Shrink(1).MinWidth(0)
+				ui.Text(c, detail).FontSize(12.5).FontWeight(500).TextColor(k.text).SingleLine().Ellipsis("…").Shrink(1).MinWidth(0)
 			}
 			a.activityBadge(c, k, p)
 		})
+		if focused && prefs.PaneFocusCues {
+			ui.Text(c, "Active").FontSize(10).FontWeight(600).TextColor(k.text).
+				Padding(2, 6).Radius(4).Background(k.hover).Shrink(0)
+		}
 		show := focused || hovered
 		ui.Row(c).Gap(1).AlignItems(ui.Center).Opacity(map[bool]float32{true: 1, false: 0}[show]).Children(func() {
 			if !show {
