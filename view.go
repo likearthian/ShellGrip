@@ -22,13 +22,27 @@ func (a *App) view(c *ui.Context) {
 	a.runPosted()
 	k := colorsOf(c)
 	a.focusedWin = a.win == nil || a.win.IsFocused()
+	// The window stops asking for the user once it has them, or once no
+	// pane waits for them any more.
+	if a.focusedWin || !a.attention() {
+		a.settleWindow()
+	}
 	a.updateTabHints(c)
 	c.Root().Background(k.bgBottom)
 	ui.Column(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) { paintBackground(p, r, k) }).Children(func() {
 		a.titleBar(c, k)
-		ui.Column(c).Grow(1).MinHeight(0).Padding(0, gap, gap, gap).Children(func() {
+		content := ui.Row(c).Grow(1).MinHeight(0).Padding(0, gap, gap, gap).AlignItems(ui.Stretch)
+		content.Children(func() {
 			if t := a.tab(); t != nil {
-				a.tabContent(c, k, t)
+				if prefs.FileTree && !t.Settings && t.Focus != nil {
+					available := content.Bounds().W - 2*gap
+					width := fileTreeWidth(prefs.FileTreeWidth, available)
+					a.fileTreePanel(c, k, t.Focus, width)
+					a.fileTreeDivider(c, k, width, available)
+				}
+				ui.Column(c).Grow(1).MinWidth(0).MinHeight(0).Children(func() {
+					a.tabContent(c, k, t)
+				})
 			}
 		})
 	})
@@ -39,6 +53,7 @@ func (a *App) view(c *ui.Context) {
 	a.palette(c, k)
 	a.showCopyToast(c)
 	a.toastViewport(c, k)
+	a.vsCodeWSLHelp(c, k)
 	if a.saveDue && time.Since(a.lastSave) > time.Second {
 		a.save()
 	}
@@ -69,6 +84,9 @@ func (a *App) titleBar(c *ui.Context, k *colors) {
 	}
 	ui.Row(c).Height(titleH).Padding(0, max(bar.Right, 10), 0, left).Gap(14).AlignItems(ui.Center).DragWindow().Children(func() {
 		a.hostChip(c, k)
+		if iconButton(c, k, "columns-2", "Toggle File Tree", 30, 17).Tooltip(tip("Toggle File Tree", &cmdFileTree)).Clicked() {
+			a.toggleFileTree()
+		}
 		a.tabStrip(c, k)
 		ui.Row(c).Gap(0).AlignItems(ui.Center).Shrink(0).Children(func() {
 			a.newTabControls(c, k)
@@ -160,7 +178,11 @@ func iconButton(c *ui.Context, k *colors, name, label string, size, iconSize flo
 		col = k.text
 	}
 	b.Children(func() {
-		ui.Icon(c, icon(name)).Size(iconSize, iconSize).TextColor(col)
+		if strings.HasPrefix(name, "brand:") {
+			ui.Image(c, icon(name)).Size(iconSize, iconSize)
+		} else {
+			ui.Icon(c, icon(name)).Size(iconSize, iconSize).TextColor(col)
+		}
 	})
 	return b
 }
@@ -169,6 +191,10 @@ func iconButton(c *ui.Context, k *colors, name, label string, size, iconSize flo
 func (a *App) tabContent(c *ui.Context, k *colors, t *Tab) {
 	if t.Settings {
 		a.settingsPanel(c, k)
+		return
+	}
+	if t.preview != nil {
+		a.filePreviewPanel(c, k, t)
 		return
 	}
 	if t.Zoom != nil {
@@ -331,6 +357,11 @@ func (a *App) paneHeader(c *ui.Context, k *colors, t *Tab, p *Pane, focused, hov
 			if !show {
 				return
 			}
+			if editor := a.installedVSCode(c.Now()); editor != "" {
+				if iconButton(c, k, "brand:vscode", "Open in VS Code", 26, 16).Tooltip("Open current directory in VS Code").Clicked() {
+					a.openPaneInVSCode(c, p, editor)
+				}
+			}
 			if iconButton(c, k, "columns-2", "Split Right", 26, 16).Tooltip(tip("Split Right", &cmdSplitRight)).Clicked() {
 				t.setFocus(p)
 				a.split(false)
@@ -386,7 +417,7 @@ func (a *App) activityBadge(c *ui.Context, k *colors, p *Pane) {
 	case statusRunning:
 		activityDot(c, k.busy, 6)
 	case statusAttention:
-		ui.Box(c).Size(7, 7).Radius(4).Background(k.attention).Margin(0, 0, 0, 2).Tooltip("Needs attention")
+		attentionDot(c, k, p.attentionAt, 7).Margin(0, 0, 0, 2)
 	}
 }
 

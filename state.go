@@ -21,6 +21,7 @@ import (
 
 // Tab is a tab of the window: panes in a tree of splits.
 type Tab struct {
+	preview  *filePreview
 	ID       int
 	Settings bool
 	Name     string // the name the user gave it, "" to follow its panes
@@ -62,8 +63,10 @@ type Pane struct {
 	// lastData is when the session last printed, in Unix nanoseconds.
 	lastData atomic.Int64
 	// attention marks a pane that rang the bell or whose program finished
-	// while it was out of sight; seen clears it.
-	attention bool
+	// while it was out of sight; seen clears it. attentionAt is when it
+	// began to ask, which the cues flash after.
+	attention   bool
+	attentionAt time.Time
 	// bounds is where the pane's card was in the last frame.
 	bounds ui.Rect
 	closed bool
@@ -76,11 +79,16 @@ type Pane struct {
 
 // App is the state of GoRex's window.
 type App struct {
-	win    *mygo.Window
-	tray   *mygo.Tray
-	client *rex.Client
-	hello  rex.Hello
-	err    string
+	vsCodePath        string
+	vsCodeCheckedAt   time.Time
+	vsCodeWSLMessage  string
+	vsCodeWSLHelpOpen bool
+	fileTree          *fileTreeState
+	win               *mygo.Window
+	tray              *mygo.Tray
+	client            *rex.Client
+	hello             rex.Hello
+	err               string
 
 	tabs   []*Tab
 	active int
@@ -121,8 +129,11 @@ type App struct {
 	lastSave           time.Time
 	quitting           bool
 	// exiting lets an explicit quit close the window instead of hiding it.
-	exiting          atomic.Bool
-	focusedWin       bool
+	exiting    atomic.Bool
+	focusedWin bool
+	// cueOn tells that the window itself asks for the user: its taskbar
+	// button flashes, or its Dock icon bounces, while a pane waits.
+	cueOn            bool
 	lastSnapshot     string
 	title            string
 	ctrlHeldAt       time.Time
@@ -264,6 +275,9 @@ func (a *App) attach(p *Pane, cols, rows int) {
 				title = "GoRex"
 			}
 			mygo.NewNotification(mygo.NotificationOptions{Title: title, Body: body}).Show()
+			// A program that asks for a notification asks for the user
+			// too, as an agent waiting for an answer does.
+			update(func() { a.ring(p) })
 		},
 		OnExit: func(int) {
 			update(func() {
@@ -293,8 +307,54 @@ func (nopConn) Close() error                { return nil }
 
 func (a *App) ring(p *Pane) {
 	if t := a.tab(); t == nil || t.Focus != p || p.Tab != t || !a.focusedWin {
-		p.attention = true
+		a.wantAttention(p)
 	}
+}
+
+// wantAttention marks a pane as asking for the user, and starts the cues
+// that tell of it: its tab flashes, and so does the window.
+func (a *App) wantAttention(p *Pane) {
+	if p.attention {
+		return
+	}
+	p.attention = true
+	p.attentionAt = time.Now()
+	a.flashWindow()
+}
+
+// flashWindow asks for the user with the window itself: its taskbar
+// button flashes on Windows and Linux, and its Dock icon bounces on
+// macOS, until the window comes to the front.
+func (a *App) flashWindow() {
+	if a.win == nil || a.cueOn || a.focusedWin {
+		return
+	}
+	a.cueOn = true
+	a.win.FlashFrame(true)
+}
+
+// settleWindow stops the window's flash, once the user is back or
+// nothing waits for them.
+func (a *App) settleWindow() {
+	if !a.cueOn {
+		return
+	}
+	a.cueOn = false
+	if a.win != nil {
+		a.win.FlashFrame(false)
+	}
+}
+
+// attention tells whether a pane of any tab asks for the user.
+func (a *App) attention() bool {
+	for _, t := range a.tabs {
+		for _, p := range t.panes() {
+			if p.attention {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // newTab opens a tab with a shell in dir, after the active tab.
@@ -899,7 +959,7 @@ func (a *App) apply(byID map[string]rex.SessionInfo) {
 			if !was.Idle && was.Program != "" && in.Idle && was.Program != in.Program {
 				seen := ti == a.active && t.Focus == p && a.focusedWin
 				if !seen {
-					p.attention = true
+					a.wantAttention(p)
 				}
 				if !a.focusedWin && time.Since(was.LastInput) > 8*time.Second {
 					prog := programOf(was.Program)

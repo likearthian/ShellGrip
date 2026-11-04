@@ -88,6 +88,42 @@ func tabLabel(name, detail string, nameColor, detailColor ui.Color) []ui.Span {
 // them, to drag the window by.
 const titleFree = 56
 
+// attentionFlash is how long a tab and its dot flash after a pane asks
+// for the user: the dot alone stays lit after it.
+const attentionFlash = 8 * time.Second
+
+// attentionFlashing tells whether a cue that began at since still
+// flashes: for attentionFlash after the pane asked, unless the desktop
+// asks for less motion or there is no cue.
+func attentionFlashing(c *ui.Context, since time.Time) bool {
+	return !since.IsZero() && !c.Preferences().ReduceMotion && time.Since(since) < attentionFlash
+}
+
+// attentionPulse is how far an element is into the flash of a cue that
+// began at since, from 0 to 1 and back, or 0 when it does not flash. It
+// keeps frames coming while it flashes, and only then.
+func attentionPulse(c *ui.Context, e ui.Element, since time.Time) float32 {
+	if !attentionFlashing(c, since) {
+		return 0
+	}
+	return e.Loop("attention", 1100*time.Millisecond, ui.Bounce(ui.EaseInOut))
+}
+
+// attentionDot is the dot of a pane that asks for the user: a core in a
+// halo that pulses while the pane has just asked.
+func attentionDot(c *ui.Context, k *colors, since time.Time, size float32) ui.Element {
+	e := ui.Box(c).Size(size+8, size+8).Tooltip("Needs attention")
+	pulse := attentionPulse(c, e, since)
+	e.Draw(func(p *ui.Painter, r ui.Rect) {
+		cx, cy := r.X+r.W/2, r.Y+r.H/2
+		halo := size/2 + 2 + 3.5*pulse
+		p.Fill(ui.Rect{X: cx - halo, Y: cy - halo, W: 2 * halo, H: 2 * halo}, k.attention.Alpha(0.2+0.35*pulse), halo)
+		core := size / 2 * (1 + 0.15*pulse)
+		p.Fill(ui.Rect{X: cx - core, Y: cy - core, W: 2 * core, H: 2 * core}, k.attention, core)
+	})
+	return e
+}
+
 // tabItem draws a tab: the tiles of its panes' programs and its label.
 func (a *App) tabItem(c *ui.Context, k *colors, i int, t *Tab, width float32) {
 	active := i == a.active
@@ -102,6 +138,10 @@ func (a *App) tabItem(c *ui.Context, k *colors, i int, t *Tab, width float32) {
 		}
 	} else if e.Hovered() {
 		e.Background(k.hover)
+	}
+	// A tab whose pane asks for the user flashes, until the user comes.
+	if since := t.attentionSince(); !active && !e.Hovered() && attentionFlashing(c, since) {
+		e.Background(k.attention.Alpha(0.08 + 0.14*attentionPulse(c, e, since)))
 	}
 	e.Transition(ui.ElementTransition{Colors: true, Position: true, Duration: 160 * time.Millisecond})
 	e.Drag(t)
@@ -157,7 +197,7 @@ func (a *App) tabItem(c *ui.Context, k *colors, i int, t *Tab, width float32) {
 				a.later(c, func() { a.closeTab(t) })
 			}
 		} else if t.attention() {
-			ui.Box(c).Size(7, 7).Radius(4).Background(k.attention).Margin(0, 5, 0, 0)
+			attentionDot(c, k, t.attentionSince(), 7).Margin(0, 5, 0, 0)
 		} else if a.tabBusy(c, t) {
 			activityDot(c, k.busy, 5.5)
 		}
@@ -196,6 +236,18 @@ func (t *Tab) attention() bool {
 		}
 	}
 	return false
+}
+
+// attentionSince is when the first of its panes that asks for the user
+// did, zero when none does.
+func (t *Tab) attentionSince() time.Time {
+	var since time.Time
+	for _, p := range t.panes() {
+		if p.attention && (since.IsZero() || p.attentionAt.Before(since)) {
+			since = p.attentionAt
+		}
+	}
+	return since
 }
 
 func (a *App) tabBusy(c *ui.Context, t *Tab) bool {

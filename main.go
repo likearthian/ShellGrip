@@ -165,6 +165,7 @@ func (a *App) saveNow() {
 func (a *App) reset() {
 	a.tabs, a.active, a.focusReq = nil, 0, nil
 	a.profilesOpen = false
+	a.vsCodeWSLHelpOpen, a.vsCodeWSLMessage = false, ""
 	if a.themePreviewActive {
 		a.applyTerminalTheme(prefs.TerminalTheme)
 	}
@@ -175,6 +176,7 @@ func (a *App) reset() {
 	a.paletteOpen, a.hostOpen, a.renaming = false, false, nil
 	a.saveDue, a.quitting, a.lastSnapshot, a.title = false, false, "", ""
 	a.exiting.Store(false)
+	a.cueOn = false
 }
 
 // staleServer reports whether the server runs another build of the app

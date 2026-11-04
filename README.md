@@ -8,10 +8,43 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
 
 ## What it does
 
+- **File tree sidebar.** Toggle the left sidebar with the title-bar button,
+  View ▸ Toggle File Tree, or Ctrl+Shift+B (⇧⌘B on macOS). It follows the
+  focused shell's current directory, including WSL, with expandable folders
+  and automatic refresh every two seconds. Drag the sidebar's right edge to
+  resize it; double-click the divider to reset its width. Visibility and width
+  are saved.
+  Right-click a file or folder to copy its full path or its path relative to
+  the tree's current directory. HTML files include **Open in Default Browser**;
+  folders include **Open Folder in VS Code** when VS Code is installed. These
+  folder actions are also available on the directory label above the tree.
+- **File previews.** Click a file in the tree to view it in the main pane area.
+  Source files use syntax highlighting and line numbers; Markdown renders
+  headings, lists, tables, emphasis, code blocks, and local images. Images
+  (PNG, JPEG, GIF, WebP, BMP, TIFF, and SVG) fit inside the preview. Other
+  text-based files fall back to plain text; binary files show **unsupported
+  content**. Text previews accept UTF-8 and legacy Windows-1252 encoding.
+  Drag to select preview text, then use Ctrl+C (⌘C on macOS) or
+  right-click ▸ Copy. Select All includes the whole document; line numbers are
+  excluded from copied code. Tabs display at four-column stops; copying keeps
+  the original tabs and spaces. Previews are read-only; press Escape or
+  close the preview to return to the shell with its layout and session intact.
+  Text previews are limited to 2 MB / 20,000 lines; image files to 32 MB and
+  raster images to 32 million pixels. Remote Markdown images remain placeholders.
+  Source files above 64 KB, or with lines longer than 4,096 bytes, open in a
+  virtualized viewer, with syntax colors added in the background for recognized
+  languages. Long lines wrap in bounded chunks to keep scrolling responsive;
+  copying preserves the original text.
 - **Tabs and split panes.** Every pane is a card over the window's gradient,
   with its program's icon, name and directory in its header, and buttons to
   split right, split down, zoom and close. Drag the gaps between panes to
   resize them (double-click resets a split to half).
+  When VS Code is installed, its logo in the pane header opens that shell's
+  current directory in VS Code. WSL shells open through Remote–WSL in the
+  shell's distribution, using the Microsoft **WSL** extension
+  (`ms-vscode-remote.remote-wsl`). If the extension check or launch fails,
+  a dialog shows the error, extension information, a Marketplace link, and
+  an install command to copy. WSL folders in the file tree use Remote–WSL too.
 - **Terminal profiles.** Click **+** to open the default terminal, or the
   adjacent dropdown to choose an installed shell. Use the button beside a
   profile to make it the saved default (marked with a check). Windows profiles
@@ -35,9 +68,12 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
   newest child, its command line and directory): headers and tabs name the
   program (`Node`, `Git Changes` for lazygit, `Codex`, `SSH host`…) and its
   working directory, a green dot shows a program printing, and an orange dot
-  marks a pane whose program finished or rang the bell out of sight. When
-  the window is in the background, a long command finishing posts a
-  notification.
+  marks a pane whose program finished, rang the bell, or asked for a
+  notification out of sight. Its tab flashes amber for a few seconds and the
+  window's taskbar button (Windows, Linux) or Dock icon (macOS) asks for you
+  until the window comes back to the front, unless the desktop asks for less
+  motion. When the window is in the background, a long command finishing
+  posts a notification.
 - **Tab icons** stack the tiles of a tab's programs, the focused pane's in
   front, as Rex does. WSL panes use their distribution's icon and color,
   with a Linux icon for unrecognized distributions. Tabs reorder by dragging, rename by double-click, and
@@ -87,6 +123,7 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
 | ⇧⌘R | Ctrl+Shift+R | Rename tab |
 | ⇧⌘P, ⌘P | Ctrl+Shift+P | Command palette |
 | ⌘K | Ctrl+Shift+K | Clear |
+| ⇧⌘B | Ctrl+Shift+B | Toggle file tree |
 | ⌘+ ⌘− ⌘0 | Ctrl+= Ctrl+- Ctrl+Shift+0 | Text size |
 | ⌥⌘Q | | Quit and end all sessions |
 

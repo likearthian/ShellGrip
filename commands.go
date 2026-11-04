@@ -26,6 +26,7 @@ type command struct {
 }
 
 var (
+	cmdFileTree    = command{Title: "Toggle File Tree", Accel: "CmdOrCtrl+Shift+B", Keys: "⇧⌘B", Other: ctrlShift(ui.KeyB), Run: func(a *App) { a.toggleFileTree() }}
 	cmdSettings    = command{Title: "Settings", Run: func(a *App) { a.openSettings() }}
 	cmdThemes      = command{Title: "Themes", Run: func(a *App) { a.openThemes() }}
 	cmdNewTab      = command{Title: "New Tab", Accel: "CmdOrCtrl+T", Keys: "⌘T", Other: ctrlShift(ui.KeyT), Run: func(a *App) { a.newTab(a.currentDir()) }}
@@ -62,6 +63,7 @@ var (
 
 // paletteCommands are those the command palette lists, before the tabs.
 var paletteCommands = []*command{
+	&cmdFileTree,
 	&cmdSettings,
 	&cmdThemes,
 	&cmdNewTab, &cmdSplitRight, &cmdSplitDown, &cmdZoom, &cmdEqualize, &cmdClosePane, &cmdCloseTab,
@@ -142,6 +144,7 @@ func (a *App) menu() *mygo.Menu {
 			item(&cmdClear),
 		}},
 		{Label: "View", Submenu: []*mygo.MenuItem{
+			item(&cmdFileTree),
 			item(&cmdSettings),
 			mygo.Separator(),
 			item(&cmdPalette),

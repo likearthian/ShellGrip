@@ -17,6 +17,8 @@ import (
 // settings are the user's choices, kept in settings.json beside the
 // server's state.
 type settings struct {
+	FileTree       bool              `json:"fileTree,omitempty"`
+	FileTreeWidth  float32           `json:"fileTreeWidth,omitempty"`
 	Shortcuts      map[string]string `json:"shortcuts,omitempty"`
 	DefaultProfile string            `json:"defaultProfile,omitempty"`
 	FontFamily     string            `json:"fontFamily,omitempty"`
