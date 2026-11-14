@@ -19,6 +19,8 @@ import (
 type settings struct {
 	FileTree       bool              `json:"fileTree,omitempty"`
 	FileTreeWidth  float32           `json:"fileTreeWidth,omitempty"`
+	FileTreeView   string            `json:"fileTreeView,omitempty"`
+	SCMGraphRatio  float32           `json:"scmGraphRatio,omitempty"`
 	Shortcuts      map[string]string `json:"shortcuts,omitempty"`
 	DefaultProfile string            `json:"defaultProfile,omitempty"`
 	FontFamily     string            `json:"fontFamily,omitempty"`
@@ -151,7 +153,7 @@ func (a *App) settingsPanel(c *ui.Context, k *colors) {
 	ui.Row(c).Grow(1).MinHeight(0).MinWidth(0).AlignItems(ui.Stretch).Radius(cardR).Background(k.panel).Border(1, k.panelBorder).Clip().Children(func() {
 		ui.Column(c).Width(180).Shrink(0).Padding(16, 10).Gap(6).Background(k.track).Children(func() {
 			ui.Text(c, "Settings").FontSize(18).FontWeight(700).TextColor(k.text).Padding(4, 8, 14, 8)
-			for _, category := range []string{"Appearance", "Terminal", "Clipboard", "Keyboard Shortcuts"} {
+			for _, category := range []string{"Appearance", "Terminal", "SSH", "Clipboard", "Keyboard Shortcuts"} {
 				button := ui.Button(c.Key(category), category).Label("Settings category: " + category).Selected(a.settingsCategory == category)
 				if a.settingsCategory == category {
 					button.Background(k.panelSel).TextColor(k.text).Border(1, k.textFaint)
@@ -264,6 +266,8 @@ func (a *App) settingsPanel(c *ui.Context, k *colors) {
 
 					case "Keyboard Shortcuts":
 						a.keyboardShortcutSettings(c, k)
+					case "SSH":
+						a.sshSettings(c, k)
 					case "Clipboard":
 						ui.Column(c).Gap(8).Children(func() {
 							ui.Text(c, "Clipboard").FontSize(13).FontWeight(600).TextColor(k.text)

@@ -99,10 +99,16 @@ type App struct {
 	focusReq *Pane
 
 	// The command palette, the host's popover and the tab being renamed.
-	paletteOpen        bool
-	paletteQuery       string
-	paletteSel         int
-	hostOpen           bool
+	paletteOpen  bool
+	paletteQuery string
+	paletteSel   int
+	hostOpen     bool
+	aboutOpen    bool
+	// ramApp and ramServer are the memory the app and its server work in,
+	// read while the host's popover is open.
+	ramApp, ramServer uint64
+	ramAt             time.Time
+
 	profilesOpen       bool
 	settingsCategory   string
 	shortcutQuery      string
@@ -122,12 +128,21 @@ type App struct {
 	themeQuery         string
 	themeNames         []string
 	profiles           []terminalProfile
-	renaming           *Tab
-	renameText         string
-	renameFocus        bool
-	saveDue            bool
-	lastSave           time.Time
-	quitting           bool
+	// sshConns are the saved SSH targets, and the draft is the form that
+	// edits one; sshNotice is what the last import did.
+	sshConns  []sshConnection
+	sshDraft  *sshDraft
+	sshNotice string
+	// sftpSessions are the SFTP connections of SSH panes, which the remote
+	// tree reads through.
+	sftpSessions map[int]*sftpSession
+	remoteTree   *remoteTreeState
+	renaming     *Tab
+	renameText   string
+	renameFocus  bool
+	saveDue      bool
+	lastSave     time.Time
+	quitting     bool
 	// exiting lets an explicit quit close the window instead of hiding it.
 	exiting    atomic.Bool
 	focusedWin bool
@@ -146,12 +161,39 @@ type App struct {
 	posted []func()
 	// services keeps redraw requests available to menu callbacks.
 	services ui.Services
+
+	// gitByDir caches what each directory's repository is, and the branch
+	// menu and its prompts belong to the panes' headers.
+	gitMu     sync.Mutex
+	gitByDir  map[string]*gitCacheEntry
+	gitMenu   gitMenuState
+	gitPrompt gitPromptState
+	gitAuth   gitAuthState
+
+	// The Source Control pane's draft message, folded groups and history.
+	scmDir           string
+	scmMessage       string
+	scmExpanded      map[string]bool
+	scmGraphHistory  *gitHistory
+	scmGraphRows     []scmGraphRow
+	scmGraphSelected string
+	historyMu        sync.Mutex
+	historyByDir     map[string]*gitHistoryEntry
 }
 
+// post appends a change to make in the next frame, from a terminal or a
+// goroutine of a view without a window, as in tests.
 func (a *App) post(fn func()) {
 	a.postMu.Lock()
 	a.posted = append(a.posted, fn)
 	a.postMu.Unlock()
+}
+
+// invalidate asks the window to draw again, from any goroutine.
+func (a *App) invalidate() {
+	if a.win != nil {
+		a.win.Invalidate()
+	}
 }
 
 // later changes the tree of tabs and panes once the frame building now
@@ -422,6 +464,16 @@ func (a *App) closePane(p *Pane) {
 		return
 	}
 	p.closed = true
+	a.closeSFTPPane(p)
+	if a.gitMenu.pane == p {
+		a.gitMenu = gitMenuState{}
+	}
+	if a.gitPrompt.pane == p {
+		a.gitPrompt = gitPromptState{}
+	}
+	if a.gitAuth.pane == p {
+		a.gitAuth = gitAuthState{}
+	}
 	if p.term != nil {
 		p.term.Close()
 	}
@@ -497,6 +549,16 @@ func (a *App) removeTab(t *Tab) {
 func (a *App) closeTab(t *Tab) {
 	for _, p := range t.panes() {
 		p.closed = true
+		a.closeSFTPPane(p)
+		if a.gitMenu.pane == p {
+			a.gitMenu = gitMenuState{}
+		}
+		if a.gitPrompt.pane == p {
+			a.gitPrompt = gitPromptState{}
+		}
+		if a.gitAuth.pane == p {
+			a.gitAuth = gitAuthState{}
+		}
 		if p.term != nil {
 			p.term.Close()
 		}
@@ -517,6 +579,7 @@ func (a *App) selectTab(i int) {
 		t.Focus.attention = false
 	}
 	a.focusReq = t.Focus
+	a.refreshTrees()
 	a.changed()
 }
 
@@ -644,6 +707,14 @@ func (a *App) toggleZoom() {
 // label returns how a pane names itself: its program, or the title the
 // program set, and the directory it works in.
 func (p *Pane) label() (name, detail string) {
+	if conn := p.profile.SSH; conn != nil {
+		name = conn.label()
+		detail = "SSH"
+		if d := conn.detail(); d != "" && d != name {
+			detail = d
+		}
+		return
+	}
 	in := p.info
 	if p.profile.WSL {
 		return p.profile.Name, shortDir(p.directory())
@@ -693,7 +764,7 @@ func sshHost(args []string) string {
 	for i := 1; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") {
-			if len(a) == 2 && strings.Contains("bcDEeFIiJLlmOopQRSWw", a[1:]) {
+			if len(a) == 2 && strings.Contains("bcDEeFIiJLlmOoPpQRSWw", a[1:]) {
 				i++
 			}
 			continue

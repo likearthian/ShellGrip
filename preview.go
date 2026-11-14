@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -21,42 +24,79 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	extast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/text"
 	_ "golang.org/x/image/tiff"
 	"golang.org/x/text/encoding/charmap"
 )
 
 const (
-	maxPreviewText     = 2 << 20
-	maxPreviewImage    = 32 << 20
-	maxPreviewPixels   = 32_000_000
-	maxRichPreviewText = 64 << 10
+	maxPreviewText   = 2 << 20
+	maxPreviewImage  = 32 << 20
+	maxPreviewPixels = 32_000_000
+	// maxRichPreviewText bounds what the rich code view draws as one text.
+	// The text system keeps a layout only while it fits its budget, which a
+	// rune of this one fills by about 150 bytes: from some 50 KB on, the
+	// layout misses the cache and the preview lays the file out again on
+	// every frame. Past it, the virtualized viewer draws only the page in
+	// view, which scrolls at any length.
+	maxRichPreviewText = 40 << 10
 	maxRichPreviewLine = 4096
-	previewChunkRunes  = 1024
-	previewTabWidth    = 4
+	// maxRichMarkdownBlocks bounds the blocks a Markdown preview renders as
+	// one column: past it, a virtualized list keeps scrolling smooth.
+	maxRichMarkdownBlocks = 400
+	previewChunkRunes     = 1024
+	previewTabWidth       = 4
 )
 
 type filePreview struct {
-	path                    string
-	pane                    *Pane
-	loading                 bool
-	content                 previewContent
-	initialized             bool
-	scroll                  ui.ScrollState
+	path string
+	// source names where a cached preview came from, when path is a copy:
+	// a remote file downloaded for it.
+	source                   string
+	pane                     *Pane
+	loading                  bool
+	diff                     bool
+	subtitle                 string
+	diffWidth                float32
+	diffScroll               [2]ui.ScrollState
+	diffHorizontal           [2]ui.ScrollState
+	diffScrollX, diffScrollY float32
+	diffChange               int
+	diffDisplay              *diffDisplay
+	content                  previewContent
+	markdown                 ui.ListState
+	initialized              bool
+	scroll                   ui.ScrollState
+	// codeBox and gutterBox pin the syntax text and its line numbers to the
+	// size they took when the preview first laid them out. The text system
+	// caches a layout only while it fits its budget, so the larger files of
+	// the rich view would lay the same text out on every frame otherwise:
+	// tens of milliseconds a scroll tick, not one.
+	codeBox, gutterBox ui.Rect
+
 	selection               [2]int
 	copySource, copyDisplay string
 }
 
 type previewContent struct {
-	kind       string
-	message    string
-	language   string
-	source     []byte
-	lines      [][]chroma.Token
-	spans      [2][]ui.Span
-	gutter     string
-	document   ast.Node
-	code       map[ast.Node][][]chroma.Token
+	kind     string
+	message  string
+	language string
+	source   []byte
+	lines    [][]chroma.Token
+	spans    [2][]ui.Span
+	gutter   string
+	document ast.Node
+	// blocks are the document's top-level ones, the rows of its preview.
+	blocks []ast.Node
+	// inline holds the spans of each block's text, and blockImages the local
+	// images those words show, made once: a frame draws them as they are.
+	inline      map[ast.Node][]ui.Span
+	blockImages map[ast.Node][]ui.ImageSource
+	code        map[ast.Node][][]chroma.Token
+	// codeSpans are the highlighted lines of each code block, light and dark.
+	codeSpans  map[ast.Node][2][]ui.Span
 	image      ui.ImageSource
 	images     map[ast.Node]ui.ImageSource
 	buffer     *ui.TextBuffer
@@ -65,17 +105,62 @@ type previewContent struct {
 	large      bool
 	lexer      chroma.Lexer
 	ranges     [2][]ui.TextRange
+	diffLines  []diffLine
+	diffRows   []diffRow
 }
 
+// diffLine is one line of a unified diff and what it does.
+type diffLine struct {
+	text string
+	kind byte
+}
+
+// diffRow is one aligned row of a side-by-side diff.
+type diffRow struct {
+	left, right diffCell
+	marker      string
+	separator   bool
+}
+
+// diffCell is one side of a row: its line number and text, when present.
+type diffCell struct {
+	number                 int
+	text                   string
+	kind                   byte
+	present                bool
+	spans                  [2][]ui.Span
+	changeStart, changeEnd int
+}
+
+const (
+	diffLineHeight   = 21
+	diffGutterWidth  = 60
+	diffMarkerWidth  = 18
+	diffMinCodeWidth = 260
+	// Indexed buffers keep large diffs side by side without building every row.
+	maxSideBySideRows = 20000
+	maxDiffSyntaxRows = 2000
+)
+
 func (a *App) openFilePreview(c *ui.Context, p *Pane, path string) {
+	a.showPreview(p, path, "")
+	if c != nil {
+		c.Invalidate()
+	} else {
+		a.invalidate()
+	}
+}
+
+// showPreview opens path in the tab's preview, naming source when path is
+// a cache of a remote file.
+func (a *App) showPreview(p *Pane, path, source string) {
 	t := a.tab()
 	if t == nil || t.Settings {
 		return
 	}
-	preview := &filePreview{path: path, pane: p, loading: true}
+	preview := &filePreview{path: path, source: source, pane: p, loading: true}
 	t.preview = preview
 	a.focusReq = nil
-	services := c.Services()
 	go func() {
 		content := loadPreview(path)
 		initial := content
@@ -84,7 +169,7 @@ func (a *App) openFilePreview(c *ui.Context, p *Pane, path string) {
 				preview.content, preview.loading = initial, false
 			}
 		})
-		services.Invalidate()
+		a.invalidate()
 		if content.buffer != nil && content.lexer != nil {
 			content.highlightLargeText()
 			ranges := content.ranges
@@ -93,8 +178,35 @@ func (a *App) openFilePreview(c *ui.Context, p *Pane, path string) {
 					preview.content.ranges = ranges
 				}
 			})
-			services.Invalidate()
+			a.invalidate()
 		}
+	}()
+}
+
+// openDiffPreview shows what changed in a path instead of its content.
+func (a *App) openDiffPreview(c *ui.Context, p *Pane, repo *gitRepo, file gitFile, staged bool) {
+	t := a.tab()
+	if t == nil || t.Settings {
+		return
+	}
+	subtitle := "Changes"
+	if staged {
+		subtitle = "Staged changes"
+	} else if file.Y == '?' {
+		subtitle = "Untracked file"
+	}
+	preview := &filePreview{path: file.Path, pane: p, loading: true, diff: true, subtitle: subtitle}
+	t.preview = preview
+	a.focusReq = nil
+	services := c.Services()
+	go func() {
+		content := loadDiff(p, repo, file, staged)
+		a.post(func() {
+			if t.preview == preview {
+				preview.content, preview.loading = content, false
+			}
+		})
+		services.Invalidate()
 	}()
 	c.Invalidate()
 }
@@ -209,7 +321,17 @@ func loadPreview(path string) previewContent {
 	if isMarkdown {
 		md := goldmark.New(goldmark.WithExtensions(extension.GFM))
 		doc := md.Parser().Parse(text.NewReader(data))
-		content := previewContent{kind: "markdown", source: data, document: doc, code: map[ast.Node][][]chroma.Token{}, images: map[ast.Node]ui.ImageSource{}}
+		content := previewContent{
+			kind: "markdown", source: data, document: doc,
+			code:        map[ast.Node][][]chroma.Token{},
+			codeSpans:   map[ast.Node][2][]ui.Span{},
+			images:      map[ast.Node]ui.ImageSource{},
+			inline:      map[ast.Node][]ui.Span{},
+			blockImages: map[ast.Node][]ui.ImageSource{},
+		}
+		for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
+			content.blocks = append(content.blocks, n)
+		}
 		ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 			if !entering {
 				return ast.WalkContinue, nil
@@ -230,6 +352,30 @@ func loadPreview(path string) previewContent {
 						}
 					}
 				}
+			}
+			return ast.WalkContinue, nil
+		})
+		// The spans of each block's words, the images they show, and the
+		// colors of its code are made once: a frame draws a page of a long
+		// document many times over, and need not walk the tree again.
+		ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+			if !entering {
+				return ast.WalkContinue, nil
+			}
+			switch n.(type) {
+			case *ast.Heading, *ast.Paragraph, *ast.TextBlock, *extast.TableCell:
+				content.inline[n] = previewInline(n, data, ui.Span{})
+				ast.Walk(n, func(child ast.Node, entering bool) (ast.WalkStatus, error) {
+					if entering {
+						if src := content.images[child]; src != nil {
+							content.blockImages[n] = append(content.blockImages[n], src)
+						}
+					}
+					return ast.WalkContinue, nil
+				})
+			case *ast.FencedCodeBlock, *ast.CodeBlock:
+				lines := content.code[n]
+				content.codeSpans[n] = [2][]ui.Span{previewCodeLines(lines, false), previewCodeLines(lines, true)}
 			}
 			return ast.WalkContinue, nil
 		})
@@ -263,6 +409,238 @@ func loadPreview(path string) previewContent {
 	}
 	content.gutter = gutter.String()
 	return content
+}
+
+// loadDiff reads what changed in a path: the index against HEAD for a
+// staged file, the work tree against the index for an unstaged one, and
+// the work tree against nothing for an untracked one.
+func loadDiff(p *Pane, repo *gitRepo, file gitFile, staged bool) previewContent {
+	args := []string{"diff", "--no-color", "--no-ext-diff", "--", file.Path}
+	switch {
+	case staged:
+		args = []string{"diff", "--cached", "--no-color", "--no-ext-diff", "--", file.Path}
+	case file.Y == '?':
+		args = []string{"diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", file.Path}
+	}
+	out, err := gitOutput(p, repo.Dir, args...)
+	// --no-index exits with 1 when the files differ, which is the usual case.
+	if err != nil && len(out) == 0 {
+		return previewContent{kind: "diff", message: "Cannot read diff: " + err.Error()}
+	}
+	if len(out) > maxPreviewText {
+		return previewContent{kind: "diff", message: "Diff is too large to preview"}
+	}
+	text := strings.TrimRight(string(out), "\n")
+	if strings.TrimSpace(text) == "" {
+		return previewContent{kind: "diff", message: "No changes"}
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 20000 {
+		return previewContent{kind: "diff", message: "Diff has too many lines to preview"}
+	}
+	content := previewContent{kind: "diff", source: out}
+	for _, line := range lines {
+		content.diffLines = append(content.diffLines, diffLine{text: line, kind: diffLineKind(line)})
+	}
+	content.diffRows = parseDiffRows(text)
+	if lexer := lexers.Match(filepath.Base(file.Path)); lexer != nil && len(content.diffRows) <= maxDiffSyntaxRows {
+		for i := range content.diffRows {
+			for _, cell := range []*diffCell{&content.diffRows[i].left, &content.diffRows[i].right} {
+				if !cell.present || cell.text == "" {
+					continue
+				}
+				tokens := previewTokens(cell.text, lexer)
+				if len(tokens) == 0 {
+					continue
+				}
+				for theme := range cell.spans {
+					cell.spans[theme] = previewCodeSpans(tokens[0], theme == 1)
+				}
+			}
+		}
+	}
+	return content
+}
+
+var diffHunkPattern = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
+
+// parseDiffRows aligns a unified diff into rows with both sides, pairing
+// each block of removals with the additions that replace it.
+func parseDiffRows(text string) []diffRow {
+	lines := strings.Split(text, "\n")
+	var rows []diffRow
+	leftNo, rightNo := 0, 0
+	prevLeftEnd, prevRightEnd := 0, 0
+	inHunk := false
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if match := diffHunkPattern.FindStringSubmatch(line); match != nil {
+			leftStart, leftCount := diffRange(match[1], match[2])
+			rightStart, rightCount := diffRange(match[3], match[4])
+			if !inHunk {
+				if leftStart > 1 || rightStart > 1 {
+					rows = append(rows, diffRow{separator: true, marker: "⋯"})
+				}
+			} else if leftStart > prevLeftEnd+1 || rightStart > prevRightEnd+1 {
+				rows = append(rows, diffRow{separator: true, marker: "⋯"})
+			}
+			leftNo, rightNo = leftStart, rightStart
+			prevLeftEnd, prevRightEnd = leftStart+leftCount-1, rightStart+rightCount-1
+			inHunk = true
+			continue
+		}
+		if strings.HasPrefix(line, "diff --git") {
+			inHunk = false
+			continue
+		}
+		if !inHunk {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "\\"):
+			// "\ No newline at end of file" belongs to the line before it.
+		case strings.HasPrefix(line, " "):
+			text := diffText(line[1:])
+			rows = append(rows, diffRow{
+				left:  diffCell{number: leftNo, text: text, kind: ' ', present: true},
+				right: diffCell{number: rightNo, text: text, kind: ' ', present: true},
+			})
+			leftNo++
+			rightNo++
+		case strings.HasPrefix(line, "-"), strings.HasPrefix(line, "+"):
+			var removed, added []string
+			for i < len(lines) && (strings.HasPrefix(lines[i], "-") || strings.HasPrefix(lines[i], "+")) {
+				if strings.HasPrefix(lines[i], "-") {
+					removed = append(removed, lines[i][1:])
+				} else {
+					added = append(added, lines[i][1:])
+				}
+				i++
+			}
+			i--
+			for j := 0; j < max(len(removed), len(added)); j++ {
+				row := diffRow{}
+				if j < len(removed) {
+					row.left = diffCell{number: leftNo, text: diffText(removed[j]), kind: '-', present: true}
+					leftNo++
+				}
+				if j < len(added) {
+					row.right = diffCell{number: rightNo, text: diffText(added[j]), kind: '+', present: true}
+					rightNo++
+				}
+				switch {
+				case row.left.present && row.right.present:
+					row.marker = "→"
+				case row.right.present:
+					row.marker = "+"
+				case row.left.present:
+					row.marker = "−"
+				}
+				rows = append(rows, row)
+			}
+		}
+	}
+	for i := range rows {
+		row := &rows[i]
+		if row.left.kind == '-' && row.right.kind == '+' {
+			left, right := []rune(row.left.text), []rune(row.right.text)
+			start := 0
+			for start < min(len(left), len(right)) && left[start] == right[start] {
+				start++
+			}
+			endLeft, endRight := len(left), len(right)
+			for endLeft > start && endRight > start && left[endLeft-1] == right[endRight-1] {
+				endLeft--
+				endRight--
+			}
+			row.left.changeStart, row.left.changeEnd = start, endLeft
+			row.right.changeStart, row.right.changeEnd = start, endRight
+		}
+	}
+	return rows
+}
+
+// diffText expands tabs as the file preview does, so both sides align.
+func diffText(text string) string {
+	text = strings.TrimSuffix(text, "\r")
+	column := 0
+	return previewExpandTabs(text, &column)
+}
+
+// diffRange reads a hunk header's start and count, which defaults to 1.
+func diffRange(start, count string) (int, int) {
+	at, _ := strconv.Atoi(start)
+	if count == "" {
+		return at, 1
+	}
+	n, _ := strconv.Atoi(count)
+	return at, n
+}
+
+// diffLineKind tells a diff line's role from its first characters.
+func diffLineKind(line string) byte {
+	switch {
+	case strings.HasPrefix(line, "diff --git"), strings.HasPrefix(line, "index "),
+		strings.HasPrefix(line, "new file"), strings.HasPrefix(line, "deleted file"),
+		strings.HasPrefix(line, "old mode"), strings.HasPrefix(line, "new mode"),
+		strings.HasPrefix(line, "similarity index"), strings.HasPrefix(line, "rename from"),
+		strings.HasPrefix(line, "rename to"), strings.HasPrefix(line, "copy from"),
+		strings.HasPrefix(line, "copy to"), strings.HasPrefix(line, "Binary files"),
+		strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "+++ "),
+		strings.HasPrefix(line, "\\"):
+		return 'm'
+	case strings.HasPrefix(line, "@@"):
+		return '@'
+	case strings.HasPrefix(line, "+"):
+		return '+'
+	case strings.HasPrefix(line, "-"):
+		return '-'
+	}
+	return ' '
+}
+
+// diffSpans colors a unified diff for the preview.
+func diffSpans(lines []diffLine, k *colors, dark bool) []ui.Span {
+	spans := make([]ui.Span, 0, len(lines)*2)
+	for i, line := range lines {
+		if i > 0 {
+			spans = append(spans, ui.Span{Text: "\n"})
+		}
+		span := ui.Span{Text: line.text, Color: k.text}
+		switch line.kind {
+		case '+':
+			span.Color, span.Background = diffAdded(dark)
+		case '-':
+			span.Color, span.Background = diffRemoved(dark)
+		case '@':
+			span.Color, span.Background = diffHunk(dark)
+		case 'm':
+			span.Color = k.textFaint
+		}
+		spans = append(spans, span)
+	}
+	return spans
+}
+
+func diffAdded(dark bool) (ui.Color, ui.Color) {
+	if dark {
+		return ui.Hex("#73c991"), ui.Hex("#73c991").Alpha(0.12)
+	}
+	return ui.Hex("#1a7f37"), ui.Hex("#1a7f37").Alpha(0.12)
+}
+
+func diffRemoved(dark bool) (ui.Color, ui.Color) {
+	if dark {
+		return ui.Hex("#f14c4c"), ui.Hex("#f14c4c").Alpha(0.12)
+	}
+	return ui.Hex("#cf222e"), ui.Hex("#cf222e").Alpha(0.12)
+}
+
+func diffHunk(dark bool) (ui.Color, ui.Color) {
+	if dark {
+		return ui.Hex("#7aa2f7"), ui.Hex("#3b9eff").Alpha(0.10)
+	}
+	return ui.Hex("#0969da"), ui.Hex("#0969da").Alpha(0.10)
 }
 
 func largeTextPreview(data []byte) bool {
@@ -377,6 +755,28 @@ func (content *previewContent) highlightLargeText() {
 	}
 }
 
+// markdownPreview renders the document's blocks in the preview's scrolling
+// area. A List builds only the blocks in view, so a long document costs what
+// its visible page does, not what all of it does; a shorter one scrolls as
+// one column, which lets Select All take all of it.
+func (a *App) markdownPreview(c *ui.Context, k *colors, p *filePreview) {
+	if len(p.content.blocks) <= maxRichMarkdownBlocks {
+		ui.Scroll(c).Grow(1).MinHeight(0).Padding(24).Children(func() {
+			ui.Column(c).Gap(10).MinWidth(0).Selectable().Children(func() {
+				previewMarkdown(c, k, &p.content, p.content.document)
+			})
+		})
+		return
+	}
+	ui.Column(c).Grow(1).MinHeight(0).MinWidth(0).Selectable().Children(func() {
+		ui.List(c, &p.markdown, len(p.content.blocks), func(i int) {
+			ui.Column(c).Gap(10).MinWidth(0).Children(func() {
+				previewMarkdownBlock(c, k, &p.content, p.content.blocks[i])
+			})
+		}).Grow(1).MinHeight(0).MinWidth(0).Padding(24).Gap(10).Label("Markdown preview")
+	})
+}
+
 func (a *App) largeTextPreview(c *ui.Context, k *colors, p *filePreview) {
 	area := ui.TextAreaBufferBase(c.Key("large-file-text"), p.content.buffer).Label("File preview text").TrackScroll(&p.scroll).
 		Grow(1).MinWidth(0).MinHeight(0).Padding(12, 14).Font(defaultFontFamily).
@@ -391,6 +791,20 @@ func (a *App) largeTextPreview(c *ui.Context, k *colors, p *filePreview) {
 		p.initialized = true
 	}
 	a.previewCopyMapping(c, p, area)
+}
+
+// pinPreviewBox fixes an element at the size it took in the previous frame,
+// once it has one. The syntax text and its line numbers are layouts the text
+// system keeps only while both fit its budget together; left to measure
+// themselves, the larger ones miss it on every frame, and scrolling pays
+// their layout again each time. Their size never changes: they do not wrap.
+func pinPreviewBox(e ui.Element, box *ui.Rect) {
+	if box.W <= 0 {
+		*box = e.Bounds()
+	}
+	if box.W > 0 {
+		e.Width(box.W).Height(box.H)
+	}
 }
 
 func (a *App) previewCopyMapping(c *ui.Context, p *filePreview, area ui.Element) {
@@ -489,20 +903,40 @@ func previewCodeSpans(tokens []chroma.Token, dark bool) []ui.Span {
 
 func (a *App) filePreviewPanel(c *ui.Context, k *colors, t *Tab) {
 	p := t.preview
+	name, source := filepath.Base(p.path), p.path
+	if p.source != "" {
+		name, source = path.Base(p.source), p.source
+	}
 	if !a.paletteOpen && a.renaming == nil && c.Shortcut(0, ui.KeyEscape) {
 		a.later(c, func() { a.closeFilePreview(t) })
 	}
 	ui.Column(c.Key(fmt.Sprintf("file-preview-%p", p))).Grow(1).MinHeight(0).MinWidth(0).Radius(cardR).Clip().
 		Background(k.panel).Border(1, k.panelBorder).Children(func() {
 		ui.Row(c).Height(headerH).Padding(0, 10).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, icon("file-code")).Size(14, 14).TextColor(k.textMuted)
-			ui.Text(c, filepath.Base(p.path)).FontSize(12.5).FontWeight(600).TextColor(k.text).SingleLine().Ellipsis("…").MinWidth(0).Grow(1).Tooltip(p.path)
+			glyph := "file-code"
+			if p.diff {
+				glyph = "diff"
+			}
+			ui.Icon(c, icon(glyph)).Size(14, 14).TextColor(k.textMuted)
+			ui.Text(c, name).FontSize(12.5).FontWeight(600).TextColor(k.text).SingleLine().Ellipsis("…").MinWidth(0).Grow(1).Tooltip(source)
 			label := "Read only"
-			if p.content.language != "" {
+			if p.source != "" {
+				label = "Remote · Read only"
+			}
+			if p.diff {
+				label = p.subtitle
+				if len(p.content.diffRows) > maxSideBySideRows {
+					label += " · unified"
+				}
+			} else if p.content.language != "" {
 				label += " · " + p.content.language
 			}
 			ui.Text(c, label).FontSize(11).TextColor(k.textFaint).Shrink(0)
-			if iconButton(c, k, "x", "Close File Preview", 26, 16).Tooltip("Back to shell · Esc").Clicked() {
+			closeLabel := "Close File Preview"
+			if p.diff {
+				closeLabel = "Close Diff Preview"
+			}
+			if iconButton(c, k, "x", closeLabel, 26, 16).Tooltip("Back to shell · Esc").Clicked() {
 				a.later(c, func() { a.closeFilePreview(t) })
 			}
 		})
@@ -518,7 +952,7 @@ func (a *App) filePreviewPanel(c *ui.Context, k *colors, t *Tab) {
 		}
 		switch p.content.kind {
 		case "image":
-			ui.Image(c, p.content.image).Grow(1).MinHeight(0).MinWidth(0).Fit(ui.Contain).Label("Image preview " + filepath.Base(p.path))
+			ui.Image(c, p.content.image).Grow(1).MinHeight(0).MinWidth(0).Fit(ui.Contain).Label("Image preview " + name)
 		case "code":
 			if p.content.large {
 				a.largeTextPreview(c, k, p)
@@ -530,19 +964,26 @@ func (a *App) filePreviewPanel(c *ui.Context, k *colors, t *Tab) {
 			}
 			ui.ScrollBoth(c).Grow(1).MinHeight(0).MinWidth(0).Padding(12, 14).Children(func() {
 				ui.Row(c).Gap(14).AlignItems(ui.Start).Children(func() {
-					ui.Text(c, p.content.gutter).MinWidth(44).Shrink(0).Font(defaultFontFamily).
+					gutter := ui.Text(c, p.content.gutter).MinWidth(44).Shrink(0).Font(defaultFontFamily).
 						FontSize(12).FixedLineHeight(21).TextColor(k.textFaint).NoWrap().Unselectable()
+					pinPreviewBox(gutter, &p.gutterBox)
 					text := ui.RichText(c, p.content.spans[theme]...).Label("File preview text").
 						Font(defaultFontFamily).FontSize(12).FixedLineHeight(21).TextColor(k.text).NoWrap().Selectable().Shrink(0)
+					pinPreviewBox(text, &p.codeBox)
 					a.previewCopyMapping(c, p, text)
 				})
 			})
-		case "markdown":
-			ui.Scroll(c).Grow(1).MinHeight(0).Padding(24).Children(func() {
-				ui.Column(c).Gap(10).MinWidth(0).Selectable().Children(func() {
-					previewMarkdown(c, k, &p.content, p.content.document)
-				})
+		case "diff":
+			if len(p.content.diffRows) > 0 && len(p.content.diffRows) <= maxSideBySideRows {
+				a.sideBySideDiff(c, k, p, c.Theme().Dark)
+				return
+			}
+			ui.ScrollBoth(c).Grow(1).MinHeight(0).MinWidth(0).Padding(12, 14).Children(func() {
+				ui.RichText(c, diffSpans(p.content.diffLines, k, c.Theme().Dark)...).Label("Diff preview text").
+					Font(defaultFontFamily).FontSize(12).FixedLineHeight(21).TextColor(k.text).NoWrap().Selectable()
 			})
+		case "markdown":
+			a.markdownPreview(c, k, p)
 		}
 	})
 }

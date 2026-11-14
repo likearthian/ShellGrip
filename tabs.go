@@ -342,6 +342,9 @@ func (a *App) tiles(c *ui.Context, k *colors, t *Tab) {
 }
 
 func paneProgram(p *Pane) program {
+	if p.profile.SSH != nil {
+		return programOf("ssh")
+	}
 	if p.profile.WSL {
 		return wslProgram(strings.TrimPrefix(p.profile.ID, "wsl:"))
 	}

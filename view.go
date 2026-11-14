@@ -18,6 +18,9 @@ const (
 )
 
 func (a *App) view(c *ui.Context) {
+	theme := *c.Theme()
+	theme.Font = uiFontFamily
+	c.SetTheme(&theme)
 	a.services = c.Services()
 	a.runPosted()
 	k := colorsOf(c)
@@ -37,7 +40,7 @@ func (a *App) view(c *ui.Context) {
 				if prefs.FileTree && !t.Settings && t.Focus != nil {
 					available := content.Bounds().W - 2*gap
 					width := fileTreeWidth(prefs.FileTreeWidth, available)
-					a.fileTreePanel(c, k, t.Focus, width)
+					a.sidebarPanel(c, k, t.Focus, width)
 					a.fileTreeDivider(c, k, width, available)
 				}
 				ui.Column(c).Grow(1).MinWidth(0).MinHeight(0).Children(func() {
@@ -54,6 +57,9 @@ func (a *App) view(c *ui.Context) {
 	a.showCopyToast(c)
 	a.toastViewport(c, k)
 	a.vsCodeWSLHelp(c, k)
+	a.aboutDialog(c, k)
+	a.gitPromptDialog(c, k)
+	a.gitAuthDialog(c, k)
 	if a.saveDue && time.Since(a.lastSave) > time.Second {
 		a.save()
 	}
@@ -83,6 +89,7 @@ func (a *App) titleBar(c *ui.Context, k *colors) {
 		left += 14
 	}
 	ui.Row(c).Height(titleH).Padding(0, max(bar.Right, 10), 0, left).Gap(14).AlignItems(ui.Center).DragWindow().Children(func() {
+		ui.Image(c, appLogo).Size(24, 24).Shrink(0).Fit(ui.Contain).Label("GoRex")
 		a.hostChip(c, k)
 		if iconButton(c, k, "columns-2", "Toggle File Tree", 30, 17).Tooltip(tip("Toggle File Tree", &cmdFileTree)).Clicked() {
 			a.toggleFileTree()
@@ -330,6 +337,9 @@ func (a *App) paneHeader(c *ui.Context, k *colors, t *Tab, p *Pane, focused, hov
 	if p.info.Idle || p.info.Program == "" {
 		prog = programOf(p.info.Shell)
 	}
+	if p.profile.SSH != nil {
+		prog = programOf("ssh")
+	}
 	h := ui.Row(c).Height(headerH).Padding(0, 8, 0, 12).Gap(7).AlignItems(ui.Center).MinWidth(0)
 	if h.DoubleClicked() {
 		t.setFocus(p)
@@ -348,6 +358,16 @@ func (a *App) paneHeader(c *ui.Context, k *colors, t *Tab, p *Pane, focused, hov
 			}
 			a.activityBadge(c, k, p)
 		})
+		if p.profile.SSH != nil {
+			// The repository of the local folder says nothing of the host.
+			if a.gitMenu.pane == p {
+				a.gitMenu = gitMenuState{}
+			}
+		} else if repo := a.gitFor(c, p); repo != nil {
+			a.gitChip(c, k, p, repo)
+		} else if a.gitMenu.pane == p {
+			a.gitMenu = gitMenuState{}
+		}
 		if focused && prefs.PaneFocusCues {
 			ui.Text(c, "Active").FontSize(10).FontWeight(600).TextColor(k.text).
 				Padding(2, 6).Radius(4).Background(k.hover).Shrink(0)

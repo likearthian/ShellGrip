@@ -40,6 +40,11 @@ func (a *App) splitDirectory(p *Pane) string {
 }
 
 func (p *Pane) reportedDirectory() string {
+	// A remote shell reports its own directory over OSC 7: it belongs to
+	// the remote tree, not to the local file tree or the saved layout.
+	if p.profile.SSH != nil {
+		return ""
+	}
 	if p.term == nil {
 		return ""
 	}

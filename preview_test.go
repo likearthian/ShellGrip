@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -115,6 +117,48 @@ func TestPreviewLocalMarkdownFile(t *testing.T) {
 	}
 }
 
+// TestLargeMarkdownVirtualizes checks that a long Markdown document builds
+// only the blocks in view, lays them out as one column would, and scrolls to
+// its end.
+func TestLargeMarkdownVirtualizes(t *testing.T) {
+	registerFonts()
+	const sections = 400
+	var b strings.Builder
+	for i := range sections {
+		fmt.Fprintf(&b, "## Section %d\n\nBody %d with words.\n", i, i)
+	}
+	path := previewFixture(t, t.TempDir(), "large.md", []byte(b.String()))
+	content := loadPreview(path)
+	if len(content.blocks) <= maxRichMarkdownBlocks {
+		t.Fatalf("%d blocks were not over the limit of %d", len(content.blocks), maxRichMarkdownBlocks)
+	}
+	tab := &Tab{preview: &filePreview{path: path, content: content}}
+	a := &App{tabs: []*Tab{tab}}
+	tt := ui.NewTester(a.view, 1000, 620)
+	tt.Frame()
+	head, ok := tt.Find("Section 0")
+	if !ok || head.H <= 0 {
+		t.Fatalf("the first heading does not show: %+v", head)
+	}
+	body, ok := tt.Find("Body 0 with words.")
+	if !ok || body.Y < head.Y+head.H {
+		t.Fatalf("the paragraph of the first heading is not below it: %+v", body)
+	}
+	last := fmt.Sprintf("Section %d", sections-1)
+	if _, ok := tt.Find(last); ok {
+		t.Fatal("a document far longer than the view built its last block")
+	}
+	// The wheel reaches the blocks that were not built.
+	tt.Move(500, 300)
+	for range 300 {
+		tt.Scroll(500, 300, 0, 600)
+		tt.Frame()
+	}
+	if end, ok := tt.Find(last); !ok || end.H <= 0 {
+		t.Fatal("scrolling to the end did not build the last block")
+	}
+}
+
 func TestPreviewHighlightAndMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	content := loadPreview(previewFixture(t, dir, "code.go", []byte("package main\n// comment\nvar answer = 42\n")))
@@ -152,6 +196,23 @@ func TestPreviewHighlightAndMarkdown(t *testing.T) {
 	entity = strings.Contains(rendered.String(), "& text")
 	if !bold || !italic || !code || !entity {
 		t.Fatalf("Markdown inline styles missing: %+v", spans)
+	}
+	// What a frame draws is the spans laid out with the document, not a copy
+	// made as it draws.
+	if cached := markdown.inline[paragraph]; !slices.Equal(cached, spans) {
+		t.Fatalf("the cached spans of a paragraph differ: %+v", cached)
+	}
+	// A code block is one text of all its lines, spaced by its line height.
+	fence := markdown.document.LastChild()
+	if len(markdown.code[fence]) == 0 || len(markdown.codeSpans[fence][0]) == 0 || len(markdown.codeSpans[fence][1]) == 0 {
+		t.Fatalf("a code block has no lines or spans: %+v", markdown.codeSpans[fence])
+	}
+	var block strings.Builder
+	for _, span := range previewCodeLines([][]chroma.Token{{}, {{Type: chroma.Text, Value: "a"}}, {{Type: chroma.Text, Value: "b"}}}, false) {
+		block.WriteString(span.Text)
+	}
+	if block.String() != "\na\nb" {
+		t.Fatalf("code lines joined as %q", block.String())
 	}
 }
 

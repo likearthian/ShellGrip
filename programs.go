@@ -13,6 +13,14 @@ var assets embed.FS
 
 var svgs = map[string]*ui.SVG{}
 
+var appLogo = func() ui.ImageSource {
+	image, err := ui.DecodeBitmap(trayIcon)
+	if err != nil {
+		panic(err)
+	}
+	return image
+}()
+
 // icon returns an embedded SVG: "x" from the icons, "brand:git" from the
 // brands.
 func icon(name string) *ui.SVG {

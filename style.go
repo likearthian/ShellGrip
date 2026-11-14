@@ -122,6 +122,14 @@ func paintBackground(p *ui.Painter, r ui.Rect, k *colors) {
 //go:embed assets/fonts/JetBrainsMono-Regular.ttf
 var fontRegular []byte
 
+//go:embed assets/fonts/Inter-Regular.otf
+var uiFontRegular []byte
+
+//go:embed assets/fonts/Inter-SemiBold.otf
+var uiFontSemibold []byte
+
+const uiFontFamily = "Inter, sans-serif"
+
 //go:embed assets/fonts/JetBrainsMono-Bold.ttf
 var fontBold []byte
 
@@ -132,6 +140,11 @@ var fontItalic []byte
 var fontBoldItalic []byte
 
 func registerFonts() {
+	for _, f := range [][]byte{uiFontRegular, uiFontSemibold} {
+		if err := ui.RegisterFont(f, "Inter"); err != nil {
+			panic(err)
+		}
+	}
 	for _, f := range [][]byte{fontRegular, fontBold, fontItalic, fontBoldItalic} {
 		ui.RegisterFont(f, "JetBrains Mono")
 	}

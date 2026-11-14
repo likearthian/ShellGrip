@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,6 +84,94 @@ func TestReadFileTree(t *testing.T) {
 	rows = readFileTree(filepath.Join(root, "missing"), nil)
 	if len(rows) != 1 || !rows[0].message || rows[0].name != "Cannot read folder" {
 		t.Fatalf("missing folder: %+v", rows)
+	}
+}
+
+// TestLargeFileTreeBuildsVisibleRows checks that a folder of many entries
+// builds only the rows in view, still scrolls to its end, and opens what is
+// clicked there.
+func TestLargeFileTreeBuildsVisibleRows(t *testing.T) {
+	t.Setenv("GOREX_DIR", t.TempDir())
+	previous := prefs
+	t.Cleanup(func() { prefs = previous })
+	prefs.FileTree, prefs.FileTreeWidth = true, 240
+	dir := t.TempDir()
+	const files = 300
+	for i := range files {
+		name := fmt.Sprintf("file-%03d.md", i)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("# "+name+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := &Pane{ID: 1, startDir: dir}
+	tab := &Tab{ID: 2, Focus: p, Root: &Node{Pane: p}}
+	a := &App{tabs: []*Tab{tab}}
+	tt := ui.NewTester(a.view, 1000, 620)
+	tt.Frame()
+	waitFor(t, tt, "file tree", func() bool { return a.fileTree != nil && a.fileTree.loaded })
+	last := fmt.Sprintf("file-%03d.md", files-1)
+	if _, ok := tt.Find("Preview file " + last); ok {
+		t.Fatal("the tree built a row far below the view")
+	}
+	// The wheel reaches the rows the frame did not build.
+	tt.Move(120, 300)
+	for range files {
+		tt.Scroll(120, 300, 0, 120)
+	}
+	tt.Frame()
+	if err := tt.Click("Preview file " + last); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, tt, "file preview", func() bool { return tab.preview != nil && !tab.preview.loading })
+	if filepath.Base(tab.preview.path) != last || a.fileTree.selected != filepath.Join(dir, last) {
+		t.Fatalf("clicked %s, selected %q, preview %q", last, a.fileTree.selected, tab.preview.path)
+	}
+}
+
+// TestFileTreeRefreshKeepsPlace checks that a tree scrolled away from its
+// top stays where the user left it when the two-second read lands.
+func TestFileTreeRefreshKeepsPlace(t *testing.T) {
+	t.Setenv("GOREX_DIR", t.TempDir())
+	previous := prefs
+	t.Cleanup(func() { prefs = previous })
+	prefs.FileTree, prefs.FileTreeWidth = true, 240
+	dir := t.TempDir()
+	const files = 300
+	for i := range files {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("file-%03d.md", i)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := &Pane{ID: 1, startDir: dir}
+	a := &App{tabs: []*Tab{{ID: 2, Focus: p, Root: &Node{Pane: p}}}}
+	tt := ui.NewTester(a.view, 1000, 620)
+	tt.Frame()
+	waitFor(t, tt, "file tree", func() bool { return a.fileTree != nil && a.fileTree.loaded })
+	firstVisible := func() string {
+		for i := range files {
+			name := fmt.Sprintf("file-%03d.md", i)
+			if _, ok := tt.Find("Preview file " + name); ok {
+				return name
+			}
+		}
+		return ""
+	}
+	tt.Move(120, 300)
+	for range 12 {
+		tt.Scroll(120, 300, 0, 120)
+	}
+	// The wheel may ease into place over the frames that follow it.
+	for range 5 {
+		tt.Frame()
+	}
+	scrolled := firstVisible()
+	// What the timer does: read the folder again.
+	a.fileTree.next = time.Time{}
+	tt.Frame()
+	waitFor(t, tt, "refresh", func() bool { return !a.fileTree.loading })
+	tt.Frame()
+	if scrolled == "" || firstVisible() != scrolled {
+		t.Fatalf("the tree jumped from %q to %q after a refresh", scrolled, firstVisible())
 	}
 }
 

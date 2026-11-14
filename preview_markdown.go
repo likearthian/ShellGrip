@@ -5,6 +5,7 @@ import (
 	"html"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/egoist/mygo/ui"
 	"github.com/yuin/goldmark/ast"
 	extast "github.com/yuin/goldmark/extension/ast"
@@ -70,77 +71,110 @@ func previewInline(n ast.Node, source []byte, style ui.Span) []ui.Span {
 	return spans
 }
 
+// previewCodeLineHeight is a code block's line, in DIPs: the lines of its
+// block are one text, whose fixed line height spaces them.
+const previewCodeLineHeight = 20
+
+// previewCodeLines returns the spans of a code block's highlighted lines,
+// as the one text that shows them, each line ending in a newline.
+func previewCodeLines(lines [][]chroma.Token, dark bool) []ui.Span {
+	var spans []ui.Span
+	for i, line := range lines {
+		if i > 0 {
+			spans = append(spans, ui.Span{Text: "\n"})
+		}
+		if len(line) == 0 {
+			continue
+		}
+		spans = append(spans, previewCodeSpans(line, dark)...)
+	}
+	if len(spans) == 0 {
+		spans = append(spans, ui.Span{Text: " "})
+	}
+	return spans
+}
+
+// previewMarkdown renders the blocks inside parent: a blockquote's or a list
+// item's, which are built whole.
 func previewMarkdown(c *ui.Context, k *colors, content *previewContent, parent ast.Node) {
 	for n := parent.FirstChild(); n != nil; n = n.NextSibling() {
-		switch block := n.(type) {
-		case *ast.Heading:
-			size := float32(30 - (block.Level-1)*3)
-			ui.RichText(c, previewInline(n, content.source, ui.Span{})...).FontSize(size).FontWeight(700).TextColor(k.text).Margin(8, 0, 4, 0)
-		case *ast.Paragraph, *ast.TextBlock:
-			ui.RichText(c, previewInline(n, content.source, ui.Span{})...).FontSize(14).TextColor(k.text).MinWidth(0)
-			ast.Walk(n, func(child ast.Node, entering bool) (ast.WalkStatus, error) {
-				if entering {
-					if src := content.images[child]; src != nil {
-						ui.Image(c, src).Height(260).MaxWidthPercent(100).Fit(ui.Contain)
-					}
-				}
-				return ast.WalkContinue, nil
-			})
-		case *ast.FencedCodeBlock, *ast.CodeBlock:
-			ui.Column(c).Padding(12).Radius(8).Background(k.track).Gap(2).MinWidth(0).Children(func() {
-				for _, line := range content.code[n] {
-					ui.RichText(c, previewCodeSpans(line, c.Theme().Dark)...).Font(defaultFontFamily).FontSize(12).TextColor(k.text).MinHeight(18)
-				}
-			})
-		case *ast.Blockquote:
-			ui.Column(c).Padding(4, 12).Gap(8).BorderWidth(0, 0, 0, 3).BorderColor(k.panelBorder).Children(func() {
-				previewMarkdown(c, k, content, n)
-			})
-		case *ast.List:
-			ui.Column(c).Gap(6).Children(func() {
-				i := block.Start
-				for item := n.FirstChild(); item != nil; item = item.NextSibling() {
-					prefix := "•"
-					if block.IsOrdered() {
-						prefix = fmt.Sprintf("%d.", i)
-					}
-					i++
-					ui.Row(c).Gap(8).AlignItems(ui.Start).Children(func() {
-						ui.Text(c, prefix).FontSize(14).TextColor(k.textMuted).MinWidth(20).Shrink(0)
-						ui.Column(c).Gap(6).Grow(1).MinWidth(0).Children(func() { previewMarkdown(c, k, content, item) })
-					})
-				}
-			})
-		case *ast.ThematicBreak:
-			ui.Box(c).Height(1).Background(k.panelBorder).Margin(8, 0)
-		case *extast.Table:
-			ui.Column(c).Border(1, k.panelBorder).Radius(6).Clip().Children(func() {
-				for row := n.FirstChild(); row != nil; row = row.NextSibling() {
-					_, header := row.(*extast.TableHeader)
-					line := ui.Row(c).AlignItems(ui.Stretch)
-					if header {
-						line.Background(k.track)
-					}
-					line.Children(func() {
-						for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
-							weight := 400
-							if header {
-								weight = 600
-							}
-							ui.RichText(c, previewInline(cell, content.source, ui.Span{})...).FontSize(13).FontWeight(weight).TextColor(k.text).
-								Grow(1).Basis(0).MinWidth(0).Padding(8).Border(0.5, k.panelBorder)
-						}
-					})
-				}
-			})
-		case *ast.HTMLBlock:
-			// Raw HTML stays inert in the native preview.
-			value := strings.TrimSpace(string(block.Lines().Value(content.source)))
-			if value != "" {
-				ui.Text(c, value).Font(defaultFontFamily).FontSize(12).TextColor(k.textMuted)
-			}
-		default:
-			previewMarkdown(c, k, content, n)
+		previewMarkdownBlock(c, k, content, n)
+	}
+}
+
+// previewMarkdownBlock renders one block of a document as a widget of its
+// own: a paragraph's rich text, a table's rows, a code block's highlighted
+// lines. A long document's blocks are the rows of its virtualized list, so
+// only those in view are built each frame; nested blocks come all at once.
+func previewMarkdownBlock(c *ui.Context, k *colors, content *previewContent, n ast.Node) {
+	switch block := n.(type) {
+	case *ast.Heading:
+		size := float32(30 - (block.Level-1)*3)
+		ui.RichText(c, content.inline[n]...).FontSize(size).FontWeight(700).TextColor(k.text).Margin(8, 0, 4, 0)
+	case *ast.Paragraph, *ast.TextBlock:
+		ui.RichText(c, content.inline[n]...).FontSize(14).TextColor(k.text).MinWidth(0)
+		for _, src := range content.blockImages[n] {
+			ui.Image(c, src).Height(260).MaxWidthPercent(100).Fit(ui.Contain)
 		}
+	case *ast.FencedCodeBlock, *ast.CodeBlock:
+		// One text of the block's lines: a text per line lays out and draws
+		// each on its own, where one lays out their lines together.
+		theme := 0
+		if c.Theme().Dark {
+			theme = 1
+		}
+		ui.Column(c).Padding(12).Radius(8).Background(k.track).MinWidth(0).Children(func() {
+			ui.RichText(c, content.codeSpans[n][theme]...).Font(defaultFontFamily).FontSize(12).
+				FixedLineHeight(previewCodeLineHeight).TextColor(k.text).MinWidth(0)
+		})
+	case *ast.Blockquote:
+		ui.Column(c).Padding(4, 12).Gap(8).BorderWidth(0, 0, 0, 3).BorderColor(k.panelBorder).Children(func() {
+			previewMarkdown(c, k, content, n)
+		})
+	case *ast.List:
+		ui.Column(c).Gap(6).Children(func() {
+			i := block.Start
+			for item := n.FirstChild(); item != nil; item = item.NextSibling() {
+				prefix := "•"
+				if block.IsOrdered() {
+					prefix = fmt.Sprintf("%d.", i)
+				}
+				i++
+				ui.Row(c).Gap(8).AlignItems(ui.Start).Children(func() {
+					ui.Text(c, prefix).FontSize(14).TextColor(k.textMuted).MinWidth(20).Shrink(0)
+					ui.Column(c).Gap(6).Grow(1).MinWidth(0).Children(func() { previewMarkdown(c, k, content, item) })
+				})
+			}
+		})
+	case *ast.ThematicBreak:
+		ui.Box(c).Height(1).Background(k.panelBorder).Margin(8, 0)
+	case *extast.Table:
+		ui.Column(c).Border(1, k.panelBorder).Radius(6).Clip().Children(func() {
+			for row := n.FirstChild(); row != nil; row = row.NextSibling() {
+				_, header := row.(*extast.TableHeader)
+				line := ui.Row(c).AlignItems(ui.Stretch)
+				if header {
+					line.Background(k.track)
+				}
+				line.Children(func() {
+					for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
+						weight := 400
+						if header {
+							weight = 600
+						}
+						ui.RichText(c, content.inline[cell]...).FontSize(13).FontWeight(weight).TextColor(k.text).
+							Grow(1).Basis(0).MinWidth(0).Padding(8).Border(0.5, k.panelBorder)
+					}
+				})
+			}
+		})
+	case *ast.HTMLBlock:
+		// Raw HTML stays inert in the native preview.
+		value := strings.TrimSpace(string(block.Lines().Value(content.source)))
+		if value != "" {
+			ui.Text(c, value).Font(defaultFontFamily).FontSize(12).TextColor(k.textMuted)
+		}
+	default:
+		previewMarkdown(c, k, content, n)
 	}
 }

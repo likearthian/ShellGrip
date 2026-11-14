@@ -77,9 +77,6 @@ func (a *App) hostPanel(c *ui.Context, k *colors, name, glyph string) {
 	ui.Column(c).Gap(7).Children(func() {
 		row("Model", h.Model)
 		row("Chip", h.Chip)
-		if h.Memory > 0 {
-			row("Memory", fmt.Sprintf("%d GB", h.Memory>>30))
-		}
 		row("System", h.OS)
 		row("User", h.User)
 	})
@@ -96,9 +93,49 @@ func (a *App) hostPanel(c *ui.Context, k *colors, name, glyph string) {
 	ui.Column(c).Gap(7).Children(func() {
 		row("Server", fmt.Sprintf("pid %d · up %s", a.hello.PID, roundDur(time.Since(a.hello.Started))))
 		row("Sessions", fmt.Sprintf("%d open, %d running a program", sessions, running))
+		row("Memory", a.ramLabel())
+		row("Version", appVersion())
 	})
 	ui.Text(c, "Sessions live in the server: quit GoRex and they keep running, and come back as they were when it opens again.").
 		FontSize(11.5).TextColor(k.textFaint).LineHeight(1.35)
+	if ui.Button(c, "About").Tooltip("About GoRex").Clicked() {
+		a.hostOpen, a.aboutOpen = false, true
+	}
+}
+
+// ramLabel names the memory the app and its server hold, as the system
+// counts their working sets.
+func (a *App) ramLabel() string {
+	app, server := a.ramUsage()
+	switch {
+	case app == 0 && server == 0:
+		return ""
+	case server == 0:
+		return memorySize(app)
+	}
+	return "App " + memorySize(app) + " · Server " + memorySize(server)
+}
+
+// ramUsage reads how much memory the app and the server work in, at most
+// every couple of seconds: the popover asks only while it is open.
+func (a *App) ramUsage() (app, server uint64) {
+	if time.Since(a.ramAt) > 2*time.Second {
+		a.ramApp = processMemory(os.Getpid())
+		a.ramServer = 0
+		if a.hello.PID != 0 && a.hello.PID != os.Getpid() {
+			a.ramServer = processMemory(a.hello.PID)
+		}
+		a.ramAt = time.Now()
+	}
+	return a.ramApp, a.ramServer
+}
+
+// memorySize names bytes as megabytes, or gigabytes past a thousand.
+func memorySize(b uint64) string {
+	if b >= 1<<30 {
+		return fmt.Sprintf("%.1f GB", float64(b)/float64(1<<30))
+	}
+	return fmt.Sprintf("%.0f MB", float64(b)/float64(1<<20))
 }
 
 func roundDur(d time.Duration) string {

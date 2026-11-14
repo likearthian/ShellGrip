@@ -8,6 +8,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"log"
 	"os"
@@ -20,7 +21,40 @@ import (
 	"gorex/internal/rex"
 )
 
+// manifestData is the app's own mygo.json, embedded so version and
+// copyright read the same from source and from a packaged build.
+//
+//go:embed mygo.json
+var manifestData []byte
+
+// manifest is the part of mygo.json the app tells about itself.
+var manifest = func() appManifest {
+	var m appManifest
+	json.Unmarshal(manifestData, &m) // the file ships with the source
+	return m
+}()
+
+type appManifest struct {
+	Version   string `json:"version"`
+	Copyright string `json:"copyright"`
+}
+
+// appVersion is the packaged app's version, or the manifest's when GoRex
+// runs from source, where its executable carries none.
+func appVersion() string {
+	if v := mygo.App.Version(); v != "" {
+		return v
+	}
+	return manifest.Version
+}
+
 func main() {
+	// Git runs GoRex itself for an askpass prompt, with the secret in the
+	// environment. Answer it before anything of the app starts.
+	if secret := os.Getenv("GOREX_ASKPASS_SECRET"); secret != "" {
+		runAskpass(secret, os.Args[1:])
+		return
+	}
 	// -server runs the session server; other arguments are AppKit's, as
 	// -NSWindowResizeTime, which it reads itself.
 	if len(os.Args) > 1 && os.Args[1] == "-server" {
@@ -28,6 +62,14 @@ func main() {
 		if err := rex.Serve(); err != nil {
 			log.Fatal(err)
 		}
+		return
+	}
+	// One GoRex per user: closing the window hides it to the tray, so a
+	// taskbar launch while it runs would otherwise start a second GUI,
+	// with a second tray icon and a second window over the same
+	// sessions. Hand such a launch to the running instance (see
+	// OnSecondInstance) and let this process exit.
+	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}
 	// The state of the sessions lives in the app's data directory, which
@@ -42,6 +84,9 @@ func main() {
 	loadSettings()
 	a := &App{}
 	mygo.App.SetMenu(a.menu())
+	mygo.App.OnSecondInstance(func(_ []string, _ string) {
+		a.showWindow()
+	})
 	mygo.App.WhenReady(func() {
 		a.open()
 		if a.win != nil {
@@ -60,6 +105,7 @@ func main() {
 	})
 	mygo.App.OnBeforeQuit(a.beforeQuit)
 	mygo.App.OnQuit(func() {
+		a.closeSFTPSessions()
 		if a.tray != nil {
 			a.tray.Destroy()
 		}
@@ -98,6 +144,7 @@ func (a *App) open() {
 	}
 	a.reset()
 	a.profiles = discoverProfiles()
+	a.sshConns = loadSSHConnections()
 	opts := mygo.WindowOptions{
 		Title:                "GoRex",
 		Width:                1000,
@@ -116,6 +163,11 @@ func (a *App) open() {
 	}
 	win := mygo.NewWindow(opts)
 	a.win = win
+	// The file trees read when the window is back, and keep quiet while it
+	// is in the background.
+	win.OnFocus(func() { a.refreshTrees() })
+	win.OnShow(func() { a.refreshTrees() })
+	win.OnBlur(func() { a.focusedWin = false })
 	if !a.restore() {
 		home, _ := os.UserHomeDir()
 		a.newTab(home)
@@ -126,6 +178,7 @@ func (a *App) open() {
 	win.OnClose(a.beforeClose)
 	win.OnClosed(func() {
 		a.saveNow()
+		a.closeSFTPSessions()
 		a.quitting = true
 		for _, t := range a.tabs {
 			for _, p := range t.panes() {
@@ -163,8 +216,12 @@ func (a *App) saveNow() {
 // reset forgets the state of a window that closed, keeping the server's
 // connection, for the next window.
 func (a *App) reset() {
+	a.closeSFTPSessions()
+	a.sftpSessions = map[int]*sftpSession{}
+	a.remoteTree = nil
 	a.tabs, a.active, a.focusReq = nil, 0, nil
 	a.profilesOpen = false
+	a.sshDraft = nil
 	a.vsCodeWSLHelpOpen, a.vsCodeWSLMessage = false, ""
 	if a.themePreviewActive {
 		a.applyTerminalTheme(prefs.TerminalTheme)
@@ -173,7 +230,9 @@ func (a *App) reset() {
 	a.settingsCategory = ""
 	a.ctrlHeldAt, a.tabHints = time.Time{}, false
 	a.copiedCharacters = 0
-	a.paletteOpen, a.hostOpen, a.renaming = false, false, nil
+	a.paletteOpen, a.hostOpen, a.aboutOpen, a.renaming = false, false, false, nil
+	a.gitMenu, a.gitPrompt, a.gitAuth = gitMenuState{}, gitPromptState{}, gitAuthState{}
+	a.scmDir, a.scmMessage, a.scmExpanded = "", "", nil
 	a.saveDue, a.quitting, a.lastSnapshot, a.title = false, false, "", ""
 	a.exiting.Store(false)
 	a.cueOn = false

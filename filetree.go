@@ -17,6 +17,13 @@ type fileTreeRow struct {
 	message    bool
 }
 
+const (
+	// The local tree reads its folders every two seconds; the remote one
+	// asks the host, whose reads are round trips, less often.
+	fileTreeRefresh   = 2 * time.Second
+	remoteTreeRefresh = 5 * time.Second
+)
+
 type fileTreeState struct {
 	pane     *Pane
 	hint     string
@@ -27,6 +34,8 @@ type fileTreeState struct {
 	loaded   bool
 	next     time.Time
 	revision int
+	selected string
+	list     ui.ListState
 }
 
 func (a *App) toggleFileTree() {
@@ -36,6 +45,27 @@ func (a *App) toggleFileTree() {
 	if t := a.tab(); t != nil {
 		a.focusReq = t.Focus
 	}
+}
+
+// showSidebar shows the sidebar in its files or Source Control view.
+func (a *App) showSidebar(view string) {
+	prefs.FileTree, prefs.FileTreeView = true, view
+	saveSettings()
+	if t := a.tab(); t != nil {
+		a.focusReq = t.Focus
+	}
+}
+
+// refreshTrees reads the trees again when the window comes back or another
+// tab is shown, rather than after their next poll.
+func (a *App) refreshTrees() {
+	if a.fileTree != nil {
+		a.fileTree.next = time.Time{}
+	}
+	if a.remoteTree != nil {
+		a.remoteTree.next = time.Time{}
+	}
+	a.invalidate()
 }
 
 // Only expanded folders are read. Symlinks remain leaves, so recursive
@@ -87,6 +117,11 @@ func (a *App) refreshFileTree(c *ui.Context, p *Pane) *fileTreeState {
 		s = &fileTreeState{pane: p, hint: hint, expanded: map[string]bool{}}
 		a.fileTree = s
 	}
+	// The tree follows the window: a background window reads nothing, and
+	// reads again as soon as it comes back.
+	if !a.focusedWin {
+		return s
+	}
 	if s.loading || c.Now().Before(s.next) {
 		return s
 	}
@@ -122,13 +157,46 @@ func (a *App) refreshFileTree(c *ui.Context, p *Pane) *fileTreeState {
 			}
 			if s.root != root {
 				s.expanded = map[string]bool{}
+				s.selected = ""
 			}
 			s.root, s.rows, s.loaded = root, rows, true
-			s.next = time.Now().Add(2 * time.Second)
+			s.next = time.Now().Add(fileTreeRefresh)
 		})
 		services.Invalidate()
 	}()
 	return s
+}
+
+// sidebarColors gives the sidebar its own surfaces, a little flatter than
+// the panes', in both appearances.
+func sidebarColors(c *ui.Context, k *colors) *colors {
+	sidebar := *k
+	if c.Theme().Dark {
+		sidebar.panel = ui.Hex("#191a1c")
+		sidebar.text = ui.Hex("#d3d6db")
+		sidebar.textMuted = ui.Hex("#a9adb5")
+		sidebar.panelSel = ui.Hex("#2d4672")
+		sidebar.hover = ui.Hex("#25272b")
+	} else {
+		sidebar.panel = ui.Hex("#f7f8fa")
+		sidebar.panelSel = ui.Hex("#d4e2ff")
+	}
+	return &sidebar
+}
+
+// sidebarPanel draws the left sidebar: the file tree, or Source Control.
+func (a *App) sidebarPanel(c *ui.Context, k *colors, p *Pane, width float32) {
+	// An SSH pane shows the host's folders, through the same SFTP
+	// connection as the remote tree.
+	if p.profile.SSH != nil {
+		a.remoteTreePanel(c, k, p, width)
+		return
+	}
+	if prefs.FileTreeView == "scm" {
+		a.sourceControlPanel(c, k, p, width)
+		return
+	}
+	a.fileTreePanel(c, k, p, width)
 }
 
 const defaultFileTreeWidth float32 = 240
@@ -167,12 +235,32 @@ func (a *App) fileTreeDivider(c *ui.Context, k *colors, width, available float32
 }
 
 func (a *App) fileTreePanel(c *ui.Context, k *colors, p *Pane, width float32) {
+	k = sidebarColors(c, k)
 	s := a.refreshFileTree(c, p)
-	c.After(2 * time.Second)
+	c.After(fileTreeRefresh)
+	selectedPath := s.selected
+	if selectedPath == "" {
+		selectedPath = s.root
+		if t := a.tab(); t != nil && t.preview != nil {
+			selectedPath = t.preview.path
+		}
+	}
+	message := ""
+	switch {
+	case !s.loaded:
+		message = "Loading…"
+	case s.root == "":
+		message = "Directory unavailable"
+	}
 	ui.Column(c.Key("file-tree")).Width(width).Shrink(0).MinHeight(0).
-		Radius(cardR).Background(k.panel).Border(1, k.panelBorder).Clip().Children(func() {
-		ui.Row(c).Height(headerH).Padding(0, 10).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Files").FontSize(12.5).FontWeight(600).TextColor(k.text).Grow(1)
+		Radius(cardR).Background(k.panel).Clip().Children(func() {
+		ui.Row(c).Height(36).Padding(0, 10).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "Files").FontSize(13).FontWeight(500).TextColor(k.text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			if iconButton(c, k, "git-branch", "Show Source Control", 24, 14).Tooltip("Source Control").Clicked() {
+				prefs.FileTreeView = "scm"
+				saveSettings()
+				c.Invalidate()
+			}
 			if iconButton(c, k, "rotate-ccw", "Refresh File Tree", 24, 14).Tooltip("Refresh").Clicked() {
 				s.next = time.Time{}
 				s.revision++
@@ -182,64 +270,141 @@ func (a *App) fileTreePanel(c *ui.Context, k *colors, p *Pane, width float32) {
 				a.toggleFileTree()
 			}
 		})
-		root := s.root
-		if root == "" {
-			root = s.hint
+		// A List builds only the rows in view: a folder of thousands
+		// costs a page of it, not all of it, in the frames a page of a
+		// preview scrolls beside it. Its root comes first, then either
+		// what the root holds or the one message saying why it shows
+		// none.
+		rows := 1 + len(s.rows)
+		if message != "" {
+			rows = 2
 		}
-		rootLabel := ui.Text(c, root).Label("File Tree Directory").FontSize(11).TextColor(k.textMuted).SingleLine().Ellipsis("…").Tooltip(root).Margin(0, 10, 8, 10)
-		if s.root != "" {
-			a.fileTreeContextMenu(c, rootLabel, s.root, fileTreeRow{path: s.root, directory: true})
+		s.list.Key = func(row int) any {
+			switch {
+			case row == 0:
+				return "file-tree-root"
+			case message != "":
+				return "file-tree-message"
+			}
+			return s.rows[row-1].path
 		}
-		ui.Scroll(c.Key(root)).Grow(1).MinHeight(0).Padding(4, 6).Children(func() {
-			if !s.loaded {
-				ui.Text(c, "Loading…").FontSize(12).TextColor(k.textFaint).Padding(6)
-			} else if s.root == "" {
-				ui.Text(c, "Directory unavailable").FontSize(12).TextColor(k.textFaint).Padding(6)
+		ui.List(c, &s.list, rows, func(i int) {
+			switch {
+			case i == 0:
+				a.fileTreeRootRow(c, k, s, selectedPath)
+			case message != "":
+				ui.Text(c, message).FontSize(12).TextColor(k.textFaint).Padding(6)
+			default:
+				a.fileTreeEntryRow(c, k, s, selectedPath, s.rows[i-1])
 			}
-			for _, entry := range s.rows {
-				row := ui.Row(c.Key(entry.path+entry.name)).Height(26).Padding(0, 6, 0, float32(6+entry.depth*14)).Gap(6).
-					AlignItems(ui.Center).Radius(5).Tooltip(entry.path)
-				a.fileTreeContextMenu(c, row, s.root, entry)
-				if entry.directory {
-					row.Cursor(ui.CursorPointer).Role(ui.RoleButton).Label("Toggle folder " + entry.name)
-					if row.Hovered() {
-						row.Background(k.hover)
-					}
-					if row.Clicked() {
-						s.expanded[entry.path] = !s.expanded[entry.path]
-						s.next = time.Time{}
-						s.revision++
-						c.Invalidate()
-					}
-				} else if !entry.message {
-					row.Cursor(ui.CursorPointer).Role(ui.RoleButton).Label("Preview file " + entry.name)
-					if t := a.tab(); t != nil && t.preview != nil && t.preview.path == entry.path {
-						row.Background(k.panelSel)
-					} else if row.Hovered() {
-						row.Background(k.hover)
-					}
-					if row.Clicked() {
-						a.openFilePreview(c, p, entry.path)
-					}
-				}
-				row.Children(func() {
-					if !entry.message {
-						glyph := "file-code"
-						if entry.directory {
-							mark := "+"
-							if s.expanded[entry.path] {
-								mark = "−"
-							}
-							ui.Text(c, mark).FontSize(11).TextColor(k.textFaint).Width(8)
-							glyph = "folder-open"
-						} else {
-							ui.Spacer(c).Width(8).Grow(0)
-						}
-						ui.Icon(c, icon(glyph)).Size(13, 13).TextColor(k.textMuted).Shrink(0)
-					}
-					ui.Text(c, entry.name).FontSize(12).TextColor(k.textMuted).SingleLine().Ellipsis("…").MinWidth(0)
-				})
-			}
-		})
+		}).Grow(1).MinHeight(0).Padding(4, 6).Label("File Tree")
 	})
+}
+
+// fileTreeRootRow shows the root of the tree, which a click chooses.
+func (a *App) fileTreeRootRow(c *ui.Context, k *colors, s *fileTreeState, selectedPath string) {
+	root := s.root
+	if root == "" {
+		root = s.hint
+	}
+	rootRow := ui.Row(c).Height(28).Padding(0, 6).Gap(5).AlignItems(ui.Center).
+		Radius(4).Tooltip(root).Label("File Tree Directory")
+	if selectedPath == s.root {
+		rootRow.Background(k.panelSel)
+	} else if rootRow.Hovered() {
+		rootRow.Background(k.hover)
+	}
+	if rootRow.Clicked() {
+		s.selected = s.root
+	}
+	rootRow.Children(func() {
+		ui.Icon(c, icon("chevron-down")).Size(14, 14).Shrink(0).TextColor(k.textMuted)
+		ui.Icon(c, icon("tree-folder")).Size(17, 17).Shrink(0).TextColor(k.textMuted)
+		name := filepath.Base(root)
+		if name == "." || name == string(filepath.Separator) {
+			name = root
+		}
+		ui.Text(c, name).FontSize(13).FontWeight(600).TextColor(k.text).SingleLine().Ellipsis("…").MinWidth(0)
+	})
+	if s.root != "" {
+		a.fileTreeContextMenu(c, rootRow, s.root, fileTreeRow{path: s.root, directory: true})
+	}
+}
+
+// fileTreeEntryRow shows one entry of the tree, indented by its depth, and
+// opens folders and previews files as it is clicked.
+func (a *App) fileTreeEntryRow(c *ui.Context, k *colors, s *fileTreeState, selectedPath string, entry fileTreeRow) {
+	row := ui.Row(c).Height(28).Padding(0, 6, 0, float32(6+(entry.depth+1)*18)).Gap(5).
+		AlignItems(ui.Center).Radius(4).Tooltip(entry.path)
+	if selectedPath == entry.path {
+		row.Background(k.panelSel)
+	} else if !entry.message && row.Hovered() {
+		row.Background(k.hover)
+	}
+	a.fileTreeContextMenu(c, row, s.root, entry)
+	if entry.directory {
+		row.Cursor(ui.CursorPointer).Role(ui.RoleButton).Label("Toggle folder " + entry.name)
+		if row.Clicked() {
+			s.selected = entry.path
+			s.expanded[entry.path] = !s.expanded[entry.path]
+			s.next = time.Time{}
+			s.revision++
+			c.Invalidate()
+		}
+	} else if !entry.message {
+		row.Cursor(ui.CursorPointer).Role(ui.RoleButton).Label("Preview file " + entry.name)
+		if row.Clicked() {
+			s.selected = entry.path
+			a.openFilePreview(c, s.pane, entry.path)
+		}
+	}
+	row.Children(func() {
+		if !entry.message {
+			if entry.directory {
+				mark := "chevron-right"
+				if s.expanded[entry.path] {
+					mark = "chevron-down"
+				}
+				ui.Icon(c, icon(mark)).Size(14, 14).TextColor(k.textMuted).Shrink(0)
+			} else {
+				ui.Spacer(c).Width(14).Grow(0).Shrink(0)
+			}
+			glyph, color := fileTreeGlyph(entry, k)
+			ui.Icon(c, icon(glyph)).Size(17, 17).TextColor(color).Shrink(0)
+		}
+		color := k.text
+		if entry.message || strings.HasPrefix(entry.name, ".") {
+			color = k.textMuted
+		}
+		ui.Text(c, entry.name).FontSize(13).TextColor(color).SingleLine().Ellipsis("…").MinWidth(0)
+	})
+}
+
+func fileTreeGlyph(entry fileTreeRow, k *colors) (string, ui.Color) {
+	if entry.directory {
+		if strings.HasPrefix(entry.name, ".") {
+			return "tree-folder", k.textMuted
+		}
+		return "tree-folder", ui.Hex("#5893f8")
+	}
+	switch strings.ToLower(filepath.Ext(entry.name)) {
+	case ".kt", ".kts":
+		return "tree-kotlin", ui.Hex("#b484ed")
+	case ".json", ".jsonc", ".json5":
+		return "tree-json", ui.Hex("#b484ed")
+	case ".go":
+		return "brand:go", ui.Hex("#4bbecf")
+	case ".py":
+		return "brand:python", ui.Hex("#e1bd6a")
+	case ".js", ".jsx", ".ts", ".tsx", ".vue":
+		return "file-code", ui.Hex("#e1bd6a")
+	case ".html", ".css", ".scss", ".xml", ".svg":
+		return "file-code", ui.Hex("#e29b67")
+	case ".md", ".txt":
+		return "tree-file", k.textMuted
+	case ".yaml", ".yml", ".toml", ".ini":
+		return "tree-file", ui.Hex("#92b97a")
+	default:
+		return "tree-file", k.textMuted
+	}
 }

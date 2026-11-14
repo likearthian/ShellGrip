@@ -50,7 +50,7 @@ func TestTerminalProfilePicker(t *testing.T) {
 	profile := terminalProfile{ID: "test-shell", Name: "Test Shell", Command: []string{testShell.path}}
 	a.profiles = []terminalProfile{{ID: "auto", Name: "Default shell"}, profile}
 	tt.Frame()
-	if err := tt.Click("Terminal Profiles"); err != nil {
+	if err := tt.Click("New Tab Menu"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()

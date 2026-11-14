@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	data, err := os.ReadFile("resources/gorex-terminal-logo.png")
+	data, err := os.ReadFile("resources/gorex-terminal-logo-v3.png")
 	if err != nil {
 		log.Fatal(err)
 	}

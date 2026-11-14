@@ -11,13 +11,56 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
 - **File tree sidebar.** Toggle the left sidebar with the title-bar button,
   View ▸ Toggle File Tree, or Ctrl+Shift+B (⇧⌘B on macOS). It follows the
   focused shell's current directory, including WSL, with expandable folders
-  and automatic refresh every two seconds. Drag the sidebar's right edge to
+  and automatic refresh every two seconds while the window is focused. Drag
+  the sidebar's right edge to
   resize it; double-click the divider to reset its width. Visibility and width
   are saved.
   Right-click a file or folder to copy its full path or its path relative to
   the tree's current directory. HTML files include **Open in Default Browser**;
   folders include **Open Folder in VS Code** when VS Code is installed. These
   folder actions are also available on the directory label above the tree.
+- **Source Control sidebar.** Switch the left sidebar between Files and
+  Source Control with the button in its header, or with **Show Files** and
+  **Show Source Control** in the command palette. The pane shows the current
+  branch and its distance from upstream, a commit message box (Ctrl+Enter
+  commits), and the staged and unstaged changes as a folder tree, where a
+  folder holding only one folder reads as one path row. Status letters and
+  stage/unstage actions cover one file, one folder, or all of them.
+  Clicking a changed file shows its diff side by side — staged, unstaged,
+  or untracked — with both line numbers and the changed lines highlighted,
+  instead of its content. Very large diffs fall back to a unified view.
+  Below, the recent commit graph lists
+  its hashes, subjects and branch or tag decorations. The sidebar's choice
+  is saved. WSL directories use the same helper as the branch menu.
+- **SSH tabs.** Save connections in Settings ▸ SSH, or import your
+  `~/.ssh/config` with one click, then open one from the menu beside + in the
+  title bar. An SSH tab is a normal tab: it splits, comes back after a restart, and
+  names its host in the header. Connections live in `ssh.json` in GoRex's
+  data directory; the app never writes your ssh config. Password prompts use
+  a dialog, and the connection keeps itself alive. The left **Files** tree of
+  an SSH tab behaves like the local one: it follows the shell's folder,
+  expands folders, and previews files, downloading them to a cache first. To
+  follow `cd`, GoRex starts the shell with a small prompt hook for bash, zsh
+  and fish; **Follow the shell's folder** in a connection's settings turns it
+  off for hosts without a POSIX shell. The tree refreshes every five seconds
+  while the window is focused, and at once when the window or its tab comes
+  back. It speaks SFTP over the system `ssh`, using the same keys, agent,
+  ProxyJump
+  and config as the terminal. On macOS and Linux it joins the tab's
+  authenticated connection.
+- **Git branch menu.** When a shell's current directory is inside a Git
+  repository, its pane header shows the current branch (or the commit, when
+  HEAD is detached). Click it to search branches and actions: **Update
+  Project** (pull), **Commit**, **Push**, **New Branch**, **Checkout Tag or
+  Revision**, and the local branches, remote branches and tags of the
+  repository. Local, Remote and Tags fold, remote branches show under their
+  remote, and tags with a folder in their name, as `agent/v1`, group under
+  it. Actions run in GoRex's backend, not in the pane's shell, so they work
+  while another program holds the pane. A WSL pane's git runs inside its
+  distribution through the same helper that reads the repository. Commits
+  stage all changes. When git needs a username or password, GoRex asks for
+  them in a dialog with the password hidden, then retries with a temporary
+  askpass helper; the error of an action appears in the window.
 - **File previews.** Click a file in the tree to view it in the main pane area.
   Source files use syntax highlighting and line numbers; Markdown renders
   headings, lists, tables, emphasis, code blocks, and local images. Images
@@ -31,10 +74,12 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
   close the preview to return to the shell with its layout and session intact.
   Text previews are limited to 2 MB / 20,000 lines; image files to 32 MB and
   raster images to 32 million pixels. Remote Markdown images remain placeholders.
-  Source files above 64 KB, or with lines longer than 4,096 bytes, open in a
+  Source files above 40 KB, or with lines longer than 4,096 bytes, open in a
   virtualized viewer, with syntax colors added in the background for recognized
   languages. Long lines wrap in bounded chunks to keep scrolling responsive;
-  copying preserves the original text.
+  copying preserves the original text. Markdown documents above 400 blocks
+  scroll in a virtualized list that builds only the blocks in view, so Select
+  All there copies the blocks it shows.
 - **Tabs and split panes.** Every pane is a card over the window's gradient,
   with its program's icon, name and directory in its header, and buttons to
   split right, split down, zoom and close. Drag the gaps between panes to
@@ -59,8 +104,11 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
   full-screen programs (lazygit, vim, htop…) come back exactly. Closing the
   window hides GoRex to the system tray (the menu bar on macOS), without a
   dialog. Click the tray icon to show the window; right-click for its menu
-  (click on macOS). **Quit GoRex (Keep Sessions)** leaves sessions running;
-  **Quit and End All Sessions** closes their programs and the server first.
+  (click on macOS). One GoRex runs per user: launching it again while it is
+  running (e.g. from the taskbar) shows that instance's window instead of
+  starting a second one. **Quit GoRex (Keep Sessions)** leaves sessions
+  running; **Quit and End All Sessions** closes their programs and the
+  server first.
   If a tray is unavailable, closing the window uses the platform's normal
   behavior and keeps sessions running.
 - **Program activity.** The server watches each terminal's foreground
@@ -79,7 +127,9 @@ terminal plugin (Ghostty's libghostty-vt). No webview, no cgo: one ~15 MB app.
   with a Linux icon for unrecognized distributions. Tabs reorder by dragging, rename by double-click, and
   have a context menu.
 - **Host chip** with the machine's name and model; its popover shows the
-  chip, memory, OS and the session server.
+  chip, OS and user, and the session server, the memory the app and its
+  server hold, and the app version, with an **About** button for the app's
+  identity and credits.
 - **Command palette** (⇧⌘P, Ctrl+Shift+P, or the ⌘ button): every command, and every pane
   to jump to, fuzzy-matched.
 - Light and dark appearances (View ▸ Appearance), text size (⌘+ ⌘− ⌘0),
@@ -184,7 +234,9 @@ directory: shell-reported paths (OSC 7) when available, refreshed process
 inspection for native shells, and a session-tagged Linux process lookup for
 WSL. WSL sessions opened before this feature need a new tab for directory
 lookup; when lookup is unavailable, splits retain the last known directory.
-Native Windows process inspection cannot see Linux foreground programs.
+Native Windows process inspection cannot see Linux foreground programs,
+so the Git menu and Source Control run git through `wsl.exe` in the pane's
+distribution; they do not need the pane's shell.
 See Microsoft's
 [WSL command reference](https://learn.microsoft.com/en-us/windows/wsl/basic-commands).
 
@@ -196,7 +248,10 @@ See Microsoft's
 | `state.go` | tabs, the tree of splits, panes, saving and restoring the layout |
 | `view.go`, `tabs.go`, `host.go`, `commands.go` | the interface: title bar, tabs, panes, host popover, menus and palette |
 | `programs.go` | how programs show: names, glyphs, tile colors |
+| `ssh.go`, `ssh_settings.go` | saved SSH connections, importing `~/.ssh/config`, and the new-tab menu entries |
+| `sftp.go`, `sftp_tree.go`, `sftp_session.go` | the SFTP connection and the SSH tab's remote file tree |
 | `style.go`, `settings.go` | colors, fonts, terminal themes; appearance and text size |
+| `git.go`, `gitmenu.go`, `scm.go` | the branch chip of pane headers, its menu and the Source Control sidebar |
 | `internal/rex` | the session server and its client: PTYs, foreground processes, headless screens, the socket protocol |
 
 Not replicated: Rex's connections to servers on other machines; GoRex's
