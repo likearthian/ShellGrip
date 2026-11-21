@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // promptRow is a row of the shell's prompt and its input, as clickToMove

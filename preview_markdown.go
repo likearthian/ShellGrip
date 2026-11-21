@@ -41,6 +41,7 @@ func previewInline(n ast.Node, source []byte, style ui.Span) []ui.Span {
 			}
 		case *ast.CodeSpan:
 			s.Font = defaultFontFamily
+			s.Background = ui.Hex("#808080").Alpha(0.15)
 		case *extast.Strikethrough:
 			s.Strikethrough = true
 		case *ast.Link:
@@ -109,12 +110,33 @@ func previewMarkdown(c *ui.Context, k *colors, content *previewContent, parent a
 func previewMarkdownBlock(c *ui.Context, k *colors, content *previewContent, n ast.Node) {
 	switch block := n.(type) {
 	case *ast.Heading:
-		size := float32(30 - (block.Level-1)*3)
-		ui.RichText(c, content.inline[n]...).FontSize(size).FontWeight(700).TextColor(k.text).Margin(8, 0, 4, 0)
+		sizes := [...]float32{26, 21, 17.5, 15.5, 14, 13}
+		level := max(1, min(block.Level, len(sizes)))
+		size := sizes[level-1]
+		weight := 600
+		if level <= 2 {
+			weight = 700
+		}
+		color := k.text
+		if level == 6 {
+			color = k.textMuted
+		}
+		top := float32(10)
+		if level <= 2 {
+			top = 16
+		} else if level == 3 {
+			top = 12
+		}
+		h := ui.RichText(c, content.inline[n]...).FontSize(size).FontWeight(weight).TextColor(color).Margin(top, 0, 4, 0)
+		if level == 1 {
+			h.Padding(0, 0, 8, 0).BorderWidth(0, 0, 1, 0).BorderColor(k.panelBorder)
+		} else if level == 2 {
+			h.Padding(0, 0, 6, 0).BorderWidth(0, 0, 1, 0).BorderColor(k.panelBorder.Alpha(0.6))
+		}
 	case *ast.Paragraph, *ast.TextBlock:
-		ui.RichText(c, content.inline[n]...).FontSize(14).TextColor(k.text).MinWidth(0)
+		ui.RichText(c, content.inline[n]...).FontSize(14.5).FixedLineHeight(24).TextColor(k.text).MinWidth(0)
 		for _, src := range content.blockImages[n] {
-			ui.Image(c, src).Height(260).MaxWidthPercent(100).Fit(ui.Contain)
+			ui.Image(c, src).Height(260).MaxWidthPercent(100).Fit(ui.Contain).Margin(6, 0)
 		}
 	case *ast.FencedCodeBlock, *ast.CodeBlock:
 		// One text of the block's lines: a text per line lays out and draws
@@ -123,16 +145,26 @@ func previewMarkdownBlock(c *ui.Context, k *colors, content *previewContent, n a
 		if c.Theme().Dark {
 			theme = 1
 		}
-		ui.Column(c).Padding(12).Radius(8).Background(k.track).MinWidth(0).Children(func() {
-			ui.RichText(c, content.codeSpans[n][theme]...).Font(defaultFontFamily).FontSize(12).
+		lang := ""
+		if fenced, ok := block.(*ast.FencedCodeBlock); ok {
+			lang = strings.TrimSpace(string(fenced.Language(content.source)))
+		}
+		ui.Column(c).Padding(12, 16).Gap(6).Radius(8).Background(k.track).Border(1, k.panelBorder.Alpha(0.7)).MinWidth(0).Children(func() {
+			if lang != "" {
+				ui.Text(c, lang).Font(defaultFontFamily).FontSize(11).TextColor(k.textFaint).Unselectable()
+			}
+			ui.RichText(c, content.codeSpans[n][theme]...).Font(defaultFontFamily).FontSize(12.5).
 				FixedLineHeight(previewCodeLineHeight).TextColor(k.text).MinWidth(0)
 		})
 	case *ast.Blockquote:
-		ui.Column(c).Padding(4, 12).Gap(8).BorderWidth(0, 0, 0, 3).BorderColor(k.panelBorder).Children(func() {
-			previewMarkdown(c, k, content, n)
+		muted := *k
+		muted.text = k.textMuted
+		ui.Column(c).Padding(8, 14).Gap(8).Radius(4).Background(k.track.Alpha(0.45)).
+			BorderWidth(0, 0, 0, 3).BorderColor(k.panelBorder).Children(func() {
+			previewMarkdown(c, &muted, content, n)
 		})
 	case *ast.List:
-		ui.Column(c).Gap(6).Children(func() {
+		ui.Column(c).Gap(8).Children(func() {
 			i := block.Start
 			for item := n.FirstChild(); item != nil; item = item.NextSibling() {
 				prefix := "•"
@@ -141,20 +173,26 @@ func previewMarkdownBlock(c *ui.Context, k *colors, content *previewContent, n a
 				}
 				i++
 				ui.Row(c).Gap(8).AlignItems(ui.Start).Children(func() {
-					ui.Text(c, prefix).FontSize(14).TextColor(k.textMuted).MinWidth(20).Shrink(0)
+					ui.Text(c, prefix).FontSize(14.5).FixedLineHeight(24).TextColor(k.textMuted).MinWidth(22).Shrink(0)
 					ui.Column(c).Gap(6).Grow(1).MinWidth(0).Children(func() { previewMarkdown(c, k, content, item) })
 				})
 			}
 		})
 	case *ast.ThematicBreak:
-		ui.Box(c).Height(1).Background(k.panelBorder).Margin(8, 0)
+		ui.Box(c).Height(1).Background(k.panelBorder).Margin(14, 0)
 	case *extast.Table:
 		ui.Column(c).Border(1, k.panelBorder).Radius(6).Clip().Children(func() {
+			bodyRow := 0
 			for row := n.FirstChild(); row != nil; row = row.NextSibling() {
 				_, header := row.(*extast.TableHeader)
 				line := ui.Row(c).AlignItems(ui.Stretch)
 				if header {
 					line.Background(k.track)
+				} else {
+					if bodyRow%2 == 1 {
+						line.Background(k.track.Alpha(0.35))
+					}
+					bodyRow++
 				}
 				line.Children(func() {
 					for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
@@ -162,8 +200,8 @@ func previewMarkdownBlock(c *ui.Context, k *colors, content *previewContent, n a
 						if header {
 							weight = 600
 						}
-						ui.RichText(c, content.inline[cell]...).FontSize(13).FontWeight(weight).TextColor(k.text).
-							Grow(1).Basis(0).MinWidth(0).Padding(8).Border(0.5, k.panelBorder)
+						ui.RichText(c, content.inline[cell]...).FontSize(13.5).FixedLineHeight(20).FontWeight(weight).TextColor(k.text).
+							Grow(1).Basis(0).MinWidth(0).Padding(8, 12).Border(0.5, k.panelBorder)
 					}
 				})
 			}

@@ -102,10 +102,10 @@ func (p terminalProfile) environment() []string {
 	var forwarded []string
 	for _, value := range strings.Split(os.Getenv("WSLENV"), ":") {
 		name, _, _ := strings.Cut(value, "/")
-		if value != "" && !strings.EqualFold(name, "GOREX_SESSION") {
+		if value != "" && !strings.EqualFold(name, "SHELLGRIP_SESSION") {
 			forwarded = append(forwarded, value)
 		}
 	}
-	forwarded = append(forwarded, "GOREX_SESSION")
+	forwarded = append(forwarded, "SHELLGRIP_SESSION")
 	return []string{"WSLENV=" + strings.Join(forwarded, ":")}
 }

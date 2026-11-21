@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"sync"
 
-	"gorex/internal/terminal/internal/library"
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/library"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // natives describes the builds of libghostty-vt this package binds, one

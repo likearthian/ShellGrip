@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // placeholder is the character of a cell that shows part of an image

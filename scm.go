@@ -88,7 +88,9 @@ func sortSCMNode(node *scmNode) {
 func (a *App) sourceControlPanel(c *ui.Context, k *colors, p *Pane, width float32) {
 	k = sidebarColors(c, k)
 	repo := a.gitFor(c, p)
-	c.After(2 * time.Second)
+	if a.focusedWin {
+		c.After(2 * time.Second)
+	}
 	ui.Column(c.Key("source-control")).Width(width).Shrink(0).MinHeight(0).
 		Radius(cardR).Background(k.panel).Clip().Children(func() {
 		ui.Row(c).Height(36).Padding(0, 10).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -118,7 +120,17 @@ func (a *App) sourceControlPanel(c *ui.Context, k *colors, p *Pane, width float3
 			return
 		}
 		if a.scmDir != repo.Dir {
-			a.scmDir, a.scmMessage, a.scmExpanded = repo.Dir, "", nil
+			if a.scmDir != "" {
+				if a.scmMessages == nil {
+					a.scmMessages = map[string]string{}
+				}
+				if a.scmMessage != "" {
+					a.scmMessages[a.scmDir] = a.scmMessage
+				} else {
+					delete(a.scmMessages, a.scmDir)
+				}
+			}
+			a.scmDir, a.scmMessage, a.scmExpanded = repo.Dir, a.scmMessages[repo.Dir], nil
 			a.scmGraphSelected = ""
 		}
 		ui.Row(c).Height(24).Padding(0, 10).Gap(5).AlignItems(ui.Center).Children(func() {
@@ -216,6 +228,7 @@ func (a *App) commitSourceControl(p *Pane, repo *gitRepo) {
 	}
 	a.runGitAction(p, repo.Dir, "commit", "-F", file)
 	a.scmMessage = ""
+	delete(a.scmMessages, repo.Dir)
 }
 
 // scmChanges draws a section of changed files, each folder folded apart.

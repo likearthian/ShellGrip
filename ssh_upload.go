@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +16,7 @@ import (
 	"github.com/egoist/mygo/transfer"
 )
 
-const sshUploadDir = "/tmp/gorex-uploads"
+const sshUploadDir = "/tmp/shellgrip-uploads"
 
 // remoteUploadFS is the write subset of an SFTP client used to upload
 // dropped files and pasted images to a remote SSH host.
@@ -31,7 +32,7 @@ type sshUploadItem struct {
 }
 
 // sshDialUpload is overridden in tests to avoid spawning real ssh processes.
-var sshDialUpload = dialSFTP
+var sshDialUpload = dialSFTPContext
 
 // terminalDrop intercepts local file drops on SSH panes, uploads them over
 // SFTP, and pastes their remote paths into the terminal.
@@ -102,17 +103,26 @@ func sshImageExt(format transfer.Format) string {
 func (a *App) startSSHUpload(p *Pane, items []sshUploadItem) {
 	conn := *p.profile.SSH
 	s := a.sftpFor(p)
+	if s.watchCtx == nil || s.watchCtx.Err() != nil {
+		s.watchCtx, s.watchCancel = context.WithCancel(context.Background())
+	}
 	existingFS := s.fs
 	password := s.password
+	parent := s.watchCtx
 
 	go func() {
 		fs := existingFS
 		var closeFS func()
 		dialed := false
 		if fs == nil {
+			dialCtx, cancel := context.WithTimeout(parent, 30*time.Second)
 			var err error
-			fs, closeFS, err = sshDialUpload(conn, password)
+			fs, closeFS, err = sshDialUpload(dialCtx, conn, password)
+			cancel()
 			if err != nil {
+				if parent.Err() != nil {
+					return
+				}
 				a.sshUploadError(s, false, err)
 				return
 			}
@@ -133,7 +143,17 @@ func (a *App) startSSHUpload(p *Pane, items []sshUploadItem) {
 			if closeFS != nil {
 				closeFS()
 			}
+			if parent.Err() != nil {
+				return
+			}
 			a.sshUploadError(s, !dialed, err)
+			return
+		}
+
+		if parent.Err() != nil {
+			if closeFS != nil {
+				closeFS()
+			}
 			return
 		}
 

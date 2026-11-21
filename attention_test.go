@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gorex/internal/session"
+	"shellgrip/internal/session"
 )
 
 // TestAttention checks that a pane whose program finished out of sight

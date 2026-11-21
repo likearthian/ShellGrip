@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 )
 
 const (
@@ -99,7 +99,7 @@ func (a *App) titleBar(c *ui.Context, k *colors) {
 		left += 14
 	}
 	ui.Row(c).Height(titleH).Padding(0, max(bar.Right, 10), 0, left).Gap(14).AlignItems(ui.Center).DragWindow().Children(func() {
-		ui.Image(c, appLogo).Size(24, 24).Shrink(0).Fit(ui.Contain).Label("GoRex")
+		ui.Image(c, appLogo).Size(24, 24).Shrink(0).Fit(ui.Contain).Label("ShellGrip")
 		a.hostChip(c, k)
 		if iconButton(c, k, "columns-2", "Toggle File Tree", 30, 17).Tooltip(tip("Toggle File Tree", &cmdFileTree)).Clicked() {
 			a.toggleFileTree()

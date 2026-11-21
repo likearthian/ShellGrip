@@ -10,7 +10,7 @@ import (
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // View shows the terminal in a window of native UI, and takes its keyboard
@@ -241,12 +241,17 @@ type view struct {
 	// copying is the selection a release ended with Options.CopyOnSelect,
 	// and rightClick what a secondary click does, done once t.mu is
 	// released, as opening is.
-	copying    string
-	rightClick RightClickAction
-	scrolled   float32 // scrolling not yet a whole row
-	zoomed     float32 // wheel with the zoom modifier not yet a notch
-	scrollZoom bool    // a touchpad scroll gesture zooms, from how it began
-	ticking    bool    // an autoscroll tick is due
+	copying       string
+	rightClick    RightClickAction
+	scrolled      float32 // scrolling not yet a whole row
+	zoomed        float32 // wheel with the zoom modifier not yet a notch
+	scrollZoom    bool    // a touchpad scroll gesture zooms, from how it began
+	wheelTarget   float32
+	wheelExpected int
+	wheelActive   bool
+	wheelReset    bool
+	wheelSmooth   bool
+	ticking       bool // an autoscroll tick is due
 
 	// reads are the program's reads of the clipboard waiting to be
 	// answered; clipPrompt is the one the terminal's own prompt asks
@@ -300,6 +305,7 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 		v.release()
 		v.reads, v.clipPrompt, v.clipOpen = nil, nil, false
 	} else {
+		v.advanceWheel(c, e)
 		if v.applied != theme {
 			theme.apply(t.term)
 			v.applied = theme
@@ -602,6 +608,9 @@ func (v *view) menuItem(m *ui.Menu, label string, a Action) *ui.MenuItem {
 
 // input handles the input of the view as it comes.
 func (v *view) input(ev ui.InputEvent) bool {
+	if ev.Kind == ui.InputKeyDown || ev.Kind == ui.InputText || ev.Kind == ui.InputPointerDown {
+		v.wheelActive = false
+	}
 	switch ev.Kind {
 	case ui.InputKeyDown:
 		return v.keyDown(ev)
@@ -1506,6 +1515,7 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 		zooming = v.scrollZoom
 	}
 	if zooming {
+		v.wheelActive = false
 		// Rolling up is a step up. DY is the scroll offset's change, so up
 		// comes negative; a wheel's event is a notch, a trackpad's many
 		// small moves, which add up to a step by 40.
@@ -1525,6 +1535,9 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 		}
 		return true
 	}
+	if ev.Precise || ev.Momentum {
+		v.wheelActive = false
+	}
 	ch := float32(v.cellH) / v.scale
 	t.mu.Lock()
 	m := t.opts.ScrollMultiplier
@@ -1537,6 +1550,7 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 	}
 	// OnScroll runs unlocked: it may call the terminal's methods, as Feed.
 	if on := t.opts.OnScroll; on != nil && v.wheelScrollsBack(ev.Mods) && on(rows) {
+		v.wheelActive = false
 		return true
 	}
 	t.mu.Lock()
@@ -1546,6 +1560,7 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 	}
 	switch {
 	case v.wheelTracked(ev.Mods):
+		v.wheelActive = false
 		if v.mouse == nil {
 			m, err := vt.NewMouseEncoder()
 			if err != nil {
@@ -1564,6 +1579,7 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 			}
 		}
 	case v.wheelArrows():
+		v.wheelActive = false
 		// Full-screen programs scroll with the arrows (mode 1007).
 		if v.keys == nil {
 			var err error
@@ -1580,7 +1596,11 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 			t.in.push(append([]byte(nil), v.keys.Encode(vt.KeyEvent{Action: vt.KeyPress, Key: key})...))
 		}
 	default:
-		t.term.ScrollBy(rows)
+		if !ev.Precise && !ev.Momentum && v.wheelSmooth {
+			v.queueWheel(rows)
+		} else {
+			t.term.ScrollBy(rows)
+		}
 	}
 	return true
 }

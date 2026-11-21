@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -53,7 +53,7 @@ func TestTerminalCopySources(t *testing.T) {
 }
 
 func TestTerminalZoomSavesSharedFontSize(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	oldPrefs, oldFont := prefs, termFont
 	t.Cleanup(func() { prefs, termFont = oldPrefs, oldFont })
 	a := &App{}
@@ -71,6 +71,6 @@ func TestTerminalZoomSavesSharedFontSize(t *testing.T) {
 	}
 	a.terminalZoom(terminal.Zoom{Reset: true})
 	if termFont.Size != defaultFontSize || prefs.FontSize != defaultFontSize {
-		t.Fatal("terminal zoom did not reset to GoRex's default")
+		t.Fatal("terminal zoom did not reset to ShellGrip's default")
 	}
 }

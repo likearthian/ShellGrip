@@ -99,7 +99,7 @@ func TestTerminalProfilePicker(t *testing.T) {
 	for _, app := range []*App{a, b} {
 		for _, tab := range app.tabs {
 			for _, pane := range tab.panes() {
-				pane.closed = true
+				pane.markClosed()
 				if pane.term != nil {
 					pane.term.Close()
 				}

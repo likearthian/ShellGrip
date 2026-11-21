@@ -100,9 +100,9 @@ func TestPreviewLegacyWindowsText(t *testing.T) {
 }
 
 func TestPreviewLocalMarkdownFile(t *testing.T) {
-	path := os.Getenv("GOREX_PREVIEW_TEST_FILE")
+	path := os.Getenv("SHELLGRIP_PREVIEW_TEST_FILE")
 	if path == "" {
-		t.Skip("set GOREX_PREVIEW_TEST_FILE to verify a local Markdown document")
+		t.Skip("set SHELLGRIP_PREVIEW_TEST_FILE to verify a local Markdown document")
 	}
 	content := loadPreview(path)
 	if content.kind != "markdown" || content.document == nil {
@@ -413,7 +413,7 @@ func TestLargeHTMLPreviewColors(t *testing.T) {
 	t.Cleanup(func() { prefs = previous })
 	prefs.FileTree = true
 	dir := t.TempDir()
-	source := strings.Repeat(`<section class="item"><p>hello 世界</p></section>`, 2000)
+	source := strings.Repeat(`<section class="item"><p>hello 世界</p></section>`, 6500)
 	previewFixture(t, dir, "large.html", []byte(source))
 	pane := &Pane{ID: 1, startDir: dir}
 	tab := &Tab{ID: 2, Focus: pane, Root: &Node{Pane: pane}}

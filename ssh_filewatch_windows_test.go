@@ -25,9 +25,9 @@ import (
 
 // Uses a temporary loopback sshd, never a saved/production SSH connection.
 func TestSSHRelayLoopback(t *testing.T) {
-	distro := os.Getenv("GOREX_TEST_SSH_WATCH")
+	distro := os.Getenv("SHELLGRIP_TEST_SSH_WATCH")
 	if distro == "" {
-		t.Skip("set GOREX_TEST_SSH_WATCH to a WSL distribution with OpenSSH server")
+		t.Skip("set SHELLGRIP_TEST_SSH_WATCH to a WSL distribution with OpenSSH server")
 	}
 	run := func(script string) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -37,11 +37,11 @@ func TestSSHRelayLoopback(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return strings.TrimSpace(string(out)), err
 	}
-	root, err := run("mktemp -d /tmp/gorex-ssh-watch-XXXXXXXX")
+	root, err := run("mktemp -d /tmp/shellgrip-ssh-watch-XXXXXXXX")
 	if err != nil {
 		t.Skipf("WSL unavailable: %v %s", err, root)
 	}
-	if !strings.HasPrefix(root, "/tmp/gorex-ssh-watch-") || strings.ContainsAny(root, "'\r\n") {
+	if !strings.HasPrefix(root, "/tmp/shellgrip-ssh-watch-") || strings.ContainsAny(root, "'\r\n") {
 		t.Fatal("invalid fixture directory")
 	}
 	t.Cleanup(func() { run("rm -rf -- " + sshQuote(root)) })
@@ -59,7 +59,7 @@ func TestSSHRelayLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	block, err := gossh.MarshalPrivateKey(priv, "GoRex test")
+	block, err := gossh.MarshalPrivateKey(priv, "ShellGrip test")
 	if err != nil {
 		t.Fatal(err)
 	}

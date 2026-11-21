@@ -5,7 +5,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 
 	"github.com/egoist/mygo/ui"
 )

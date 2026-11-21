@@ -81,7 +81,11 @@ func (a *App) sideBySideDiff(c *ui.Context, k *colors, p *filePreview, dark bool
 	d.Theme = theme
 	count := len(d.Hunks())
 	ui.Row(c).Height(30).Padding(0, 8).Gap(4).AlignItems(ui.Center).BorderColor(k.panelBorder).BorderWidth(1, 0, 1, 0).Children(func() {
-		ui.Text(c, fmt.Sprintf("%d changes", count)).FontSize(11).TextColor(k.textMuted).Grow(1)
+		changes := fmt.Sprintf("%d changes", count)
+		if count == 1 {
+			changes = "1 change"
+		}
+		ui.Text(c, changes).FontSize(11).TextColor(k.textMuted).Grow(1)
 		if p.diffChange > 0 {
 			ui.Text(c, fmt.Sprintf("%d of %d", p.diffChange, count)).FontSize(11).TextColor(k.textFaint)
 		}

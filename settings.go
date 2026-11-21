@@ -9,9 +9,9 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 
-	"gorex/internal/appdir"
+	"shellgrip/internal/appdir"
 )
 
 // settings are the user's choices, kept in settings.json in the app's
@@ -21,6 +21,7 @@ type settings struct {
 	ScrollSpeed     float32           `json:"scrollSpeed,omitempty"`
 	ScrollbackMiB   int               `json:"scrollbackMiB,omitempty"`
 	OptionAsAlt     bool              `json:"optionAsAlt,omitempty"`
+	CustomPrompt    bool              `json:"customPrompt,omitempty"`
 	FileTree        bool              `json:"fileTree,omitempty"`
 	FileTreeWidth   float32           `json:"fileTreeWidth,omitempty"`
 	FileTreeView    string            `json:"fileTreeView,omitempty"`

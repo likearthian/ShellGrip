@@ -13,7 +13,7 @@ import (
 )
 
 func TestFileTreeResize(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	previous := prefs
 	t.Cleanup(func() { prefs = previous })
 	prefs.FileTree, prefs.FileTreeWidth = true, 0
@@ -91,7 +91,7 @@ func TestReadFileTree(t *testing.T) {
 // builds only the rows in view, still scrolls to its end, and opens what is
 // clicked there.
 func TestLargeFileTreeBuildsVisibleRows(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	previous := prefs
 	t.Cleanup(func() { prefs = previous })
 	prefs.FileTree, prefs.FileTreeWidth = true, 240
@@ -131,7 +131,7 @@ func TestLargeFileTreeBuildsVisibleRows(t *testing.T) {
 // TestFileTreeRefreshKeepsPlace checks that a tree scrolled away from its
 // top stays where the user left it when the two-second read lands.
 func TestFileTreeRefreshKeepsPlace(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	previous := prefs
 	t.Cleanup(func() { prefs = previous })
 	prefs.FileTree, prefs.FileTreeWidth = true, 240
@@ -176,7 +176,7 @@ func TestFileTreeRefreshKeepsPlace(t *testing.T) {
 }
 
 func TestFileTreeFollowsFocusAndDirectory(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	previous := prefs
 	t.Cleanup(func() { prefs = previous })
 	prefs.FileTree = false
@@ -230,7 +230,7 @@ func TestFileTreeFollowsFocusAndDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if prefs.FileTree || a.fileTree != nil {
+	if _, shown := tt.Find("File Tree"); prefs.FileTree || shown {
 		t.Fatal("file tree did not hide")
 	}
 	data, err := os.ReadFile(settingsPath())

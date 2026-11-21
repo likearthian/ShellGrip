@@ -28,7 +28,7 @@ func TestShortcutParsing(t *testing.T) {
 }
 
 func TestShortcutConflictsAndReset(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	previous := prefs
 	prefs.Shortcuts = map[string]string{}
 	t.Cleanup(func() { prefs = previous })
@@ -167,7 +167,7 @@ func TestKeyboardShortcutSettings(t *testing.T) {
 }
 
 func TestReboundTabShortcutDispatch(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	previous := prefs
 	prefs.Shortcuts = map[string]string{}
 	t.Cleanup(func() { prefs = previous })

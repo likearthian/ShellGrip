@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/transfer"
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // notTakenAfter is how long after a paste's offer is written OnPasteStatus

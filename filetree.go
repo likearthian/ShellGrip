@@ -42,7 +42,9 @@ type fileTreeState struct {
 
 func (a *App) toggleFileTree() {
 	prefs.FileTree = !prefs.FileTree
-	a.fileTree = nil
+	if prefs.FileTree {
+		a.refreshTrees()
+	}
 	saveSettings()
 	if t := a.tab(); t != nil {
 		a.focusReq = t.Focus
@@ -229,8 +231,12 @@ func (a *App) fileTreeDivider(c *ui.Context, k *colors, width, available float32
 		Tooltip("Drag to resize; double-click to reset")
 	if dx, _, ok := div.Dragged(); ok && dx != 0 {
 		prefs.FileTreeWidth = fileTreeWidth(width+dx, available)
-		saveSettings()
+		a.fileTreeDragging = true
 		c.Invalidate()
+	}
+	if a.fileTreeDragging && !div.Dragging() {
+		a.fileTreeDragging = false
+		saveSettings()
 	}
 	if div.DoubleClicked() {
 		prefs.FileTreeWidth = defaultFileTreeWidth
@@ -293,7 +299,11 @@ func (a *App) fileTreePanel(c *ui.Context, k *colors, p *Pane, width float32) {
 			case message != "":
 				return "file-tree-message"
 			}
-			return s.rows[row-1].path
+			r := s.rows[row-1]
+			if r.message {
+				return "file-tree-msg:" + r.path
+			}
+			return r.path
 		}
 		ui.List(c, &s.list, rows, func(i int) {
 			switch {

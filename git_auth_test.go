@@ -9,13 +9,28 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/egoist/mygo"
 )
 
 // TestMain lets the tests run as the askpass helper too, as the app does.
 func TestMain(m *testing.M) {
-	if secret := os.Getenv("GOREX_ASKPASS_SECRET"); secret != "" {
+	if secret := os.Getenv("SHELLGRIP_ASKPASS_SECRET"); secret != "" {
 		runAskpass(secret, os.Args[1:])
 		return
+	}
+	if os.Getenv("SHELLGRIP_PREVIEW_NATIVE_TEST") == "1" {
+		// native tests need the event loop on the process' main thread.
+		result := make(chan int, 1)
+		go func() {
+			result <- m.Run()
+			mygo.App.Quit()
+		}()
+		if err := mygo.App.Run(); err != nil {
+			os.Stderr.WriteString(err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(<-result)
 	}
 	os.Exit(m.Run())
 }
@@ -130,7 +145,7 @@ func TestNativeGitAuthentication(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, password, ok := r.BasicAuth()
 		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="gorex"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="shellgrip"`)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

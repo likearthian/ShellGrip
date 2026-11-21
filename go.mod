@@ -1,4 +1,4 @@
-module gorex
+module shellgrip
 
 go 1.27.3
 

@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 )
 
 func TestTerminalThemes(t *testing.T) {
@@ -21,7 +21,7 @@ func TestTerminalThemes(t *testing.T) {
 			t.Fatalf("theme %q did not load: %v, %v", name, err, wantErr)
 		}
 	}
-	light, dark, err = resolveTerminalTheme("GoRex nonexistent theme")
+	light, dark, err = resolveTerminalTheme("ShellGrip nonexistent theme")
 	if err == nil || light != lightTerm || dark != darkTerm {
 		t.Fatal("unavailable theme did not fall back safely")
 	}
@@ -42,7 +42,7 @@ func TestThemeChangeKeepsSession(t *testing.T) {
 	if pane.SID != sid || pane.term == nil || pane.closed || prefs.TerminalTheme != "Catppuccin Mocha" {
 		t.Fatal("changing the theme disturbed the running session")
 	}
-	a.setTerminalTheme("GoRex nonexistent theme")
+	a.setTerminalTheme("ShellGrip nonexistent theme")
 	if prefs.TerminalTheme != "Catppuccin Mocha" {
 		t.Fatal("invalid theme replaced the saved choice")
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/pkg/sftp"
 )
@@ -45,6 +47,13 @@ var errSSHAuth = errors.New("the host asks for a password")
 // config and ProxyJump, and the tree sees a real remote filesystem
 // rather than the output of ls.
 func dialSFTP(c sshConnection, password string) (remoteFS, func(), error) {
+	return dialSFTPContext(context.Background(), c, password)
+}
+
+func dialSFTPContext(ctx context.Context, c sshConnection, password string) (remoteFS, func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	extra := []string{
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "NumberOfPasswordPrompts=1",
@@ -83,7 +92,11 @@ func dialSFTP(c sshConnection, password string) (remoteFS, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
+	stop := context.AfterFunc(ctx, func() {
+		_ = cmd.Process.Kill()
+	})
 	client, err := sftp.NewClientPipe(stdout, stdin)
+	stop()
 	if err != nil {
 		cmd.Process.Kill()
 		cmd.Wait()
@@ -94,12 +107,13 @@ func dialSFTP(c sshConnection, password string) (remoteFS, func(), error) {
 		}
 		return nil, nil, errors.New(message)
 	}
-	close := func() {
-		client.Close()
+	close := sync.OnceFunc(func() {
+		// Kill first so a pending SFTP request cannot hold cleanup open.
 		cmd.Process.Kill()
+		client.Close()
 		cmd.Wait()
 		cleanup()
-	}
+	})
 	return sftpRemote{client}, close, nil
 }
 
@@ -146,7 +160,7 @@ func sftpRows(infos []os.FileInfo) []sftpRow {
 }
 
 // remoteJoin appends a name to a remote directory, whose separator is the
-// slash of the host, wherever GoRex runs.
+// slash of the host, wherever ShellGrip runs.
 func remoteJoin(dir, name string) string {
 	if dir == "" {
 		dir = "/"

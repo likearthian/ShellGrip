@@ -5,7 +5,7 @@ import (
 	"slices"
 
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // Layers of images (Kitty graphics), as Ghostty draws them, by their z.

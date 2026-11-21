@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	fetch "gorex/internal/terminal/internal/download"
+	fetch "shellgrip/internal/terminal/internal/download"
 )
 
 // nativeLibraries is the format of mygo-plugin.json.

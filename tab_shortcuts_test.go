@@ -21,7 +21,7 @@ func numberedTabs(count int) *App {
 }
 
 func TestNumberedTabShortcuts(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	a := numberedTabs(11)
 	tt := ui.NewTester(a.view, 1400, 620)
 	for _, test := range []struct {

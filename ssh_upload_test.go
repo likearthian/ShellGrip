@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 
 	"github.com/egoist/mygo/transfer"
 )
@@ -133,8 +133,8 @@ func TestShellQuotePOSIX(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
-		{"/tmp/gorex-uploads/a.png", "/tmp/gorex-uploads/a.png"},
-		{"/tmp/gorex-uploads/my file.txt", "'/tmp/gorex-uploads/my file.txt'"},
+		{"/tmp/shellgrip-uploads/a.png", "/tmp/shellgrip-uploads/a.png"},
+		{"/tmp/shellgrip-uploads/my file.txt", "'/tmp/shellgrip-uploads/my file.txt'"},
 		{"/tmp/it's.txt", `'/tmp/it'\''s.txt'`},
 		{"", "''"},
 	}
@@ -185,16 +185,16 @@ func TestSSHDropUploadsFilesAndDirectory(t *testing.T) {
 		t.Fatal("expected SSH pane drop to be handled")
 	}
 	waitForPosted(t, a, func() bool {
-		return strings.Contains(conn.String(), "/tmp/gorex-uploads/hello.txt")
+		return strings.Contains(conn.String(), "/tmp/shellgrip-uploads/hello.txt")
 	})
 
-	if got := string(fs.files["/tmp/gorex-uploads/hello.txt"]); got != "hello world" {
+	if got := string(fs.files["/tmp/shellgrip-uploads/hello.txt"]); got != "hello world" {
 		t.Fatalf("uploaded file = %q, want %q", got, "hello world")
 	}
-	if got := string(fs.files["/tmp/gorex-uploads/my folder/nested.txt"]); got != "nested" {
+	if got := string(fs.files["/tmp/shellgrip-uploads/my folder/nested.txt"]); got != "nested" {
 		t.Fatalf("uploaded nested file = %q, want %q", got, "nested")
 	}
-	wantPaste := "/tmp/gorex-uploads/hello.txt '/tmp/gorex-uploads/my folder'"
+	wantPaste := "/tmp/shellgrip-uploads/hello.txt '/tmp/shellgrip-uploads/my folder'"
 	if got := conn.String(); got != wantPaste {
 		t.Fatalf("pasted = %q, want %q", got, wantPaste)
 	}
@@ -208,16 +208,16 @@ func TestSSHDropUniqueNameOnCollision(t *testing.T) {
 	}
 
 	fs := newFakeUploadFS()
-	fs.files["/tmp/gorex-uploads/note.txt"] = []byte("first")
+	fs.files["/tmp/shellgrip-uploads/note.txt"] = []byte("first")
 	a, p, conn := newTestSSHPane(t, fs)
 
 	if !a.terminalDrop(p, []string{f1}) {
 		t.Fatal("expected SSH pane drop to be handled")
 	}
 	waitForPosted(t, a, func() bool {
-		return strings.Contains(conn.String(), "/tmp/gorex-uploads/note-2.txt")
+		return strings.Contains(conn.String(), "/tmp/shellgrip-uploads/note-2.txt")
 	})
-	if got := string(fs.files["/tmp/gorex-uploads/note-2.txt"]); got != "second" {
+	if got := string(fs.files["/tmp/shellgrip-uploads/note-2.txt"]); got != "second" {
 		t.Fatalf("uploaded file = %q, want %q", got, "second")
 	}
 }
@@ -238,7 +238,7 @@ func TestSSHPasteImageAndText(t *testing.T) {
 		t.Fatal("expected image paste on SSH pane to be handled")
 	}
 	waitForPosted(t, a, func() bool {
-		return strings.HasPrefix(conn.String(), "/tmp/gorex-uploads/paste-") &&
+		return strings.HasPrefix(conn.String(), "/tmp/shellgrip-uploads/paste-") &&
 			strings.HasSuffix(conn.String(), ".png")
 	})
 	remotePath := conn.String()
@@ -265,9 +265,9 @@ func TestSSHPasteFiles(t *testing.T) {
 		t.Fatal("expected file paste on SSH pane to be handled")
 	}
 	waitForPosted(t, a, func() bool {
-		return conn.String() == "/tmp/gorex-uploads/clip.log"
+		return conn.String() == "/tmp/shellgrip-uploads/clip.log"
 	})
-	if got := string(fs.files["/tmp/gorex-uploads/clip.log"]); got != "logdata" {
+	if got := string(fs.files["/tmp/shellgrip-uploads/clip.log"]); got != "logdata" {
 		t.Fatalf("uploaded file = %q, want %q", got, "logdata")
 	}
 }

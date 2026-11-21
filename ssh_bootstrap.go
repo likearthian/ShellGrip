@@ -12,8 +12,8 @@ const (
 elif [ -f "$HOME/.bash_login" ]; then . "$HOME/.bash_login"
 elif [ -f "$HOME/.profile" ]; then . "$HOME/.profile"
 fi
-__gorex_osc7() { printf '\033]7;file://%s%s\a' "${HOSTNAME:-}" "$PWD"; }
-PROMPT_COMMAND="__gorex_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+__shellgrip_osc7() { printf '\033]7;file://%s%s\a' "${HOSTNAME:-}" "$PWD"; }
+PROMPT_COMMAND="__shellgrip_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 `
 
 	zshEnv = `[ -f "$HOME/.zshenv" ] && . "$HOME/.zshenv"
@@ -23,14 +23,14 @@ PROMPT_COMMAND="__gorex_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 `
 
 	zshRC = `[ -f "$HOME/.zshrc" ] && . "$HOME/.zshrc"
-__gorex_osc7() { printf '\033]7;file://%s%s\a' "${HOST:-}" "$PWD" }
-precmd_functions+=(__gorex_osc7)
+__shellgrip_osc7() { printf '\033]7;file://%s%s\a' "${HOST:-}" "$PWD" }
+precmd_functions+=(__shellgrip_osc7)
 `
 
 	zshLogin = `[ -f "$HOME/.zlogin" ] && . "$HOME/.zlogin"
 `
 
-	fishHook = `function __gorex_osc7 --on-event fish_prompt
+	fishHook = `function __shellgrip_osc7 --on-event fish_prompt
     set -l h (hostname)
     printf '\x1b]7;file://%s%s\x07' $h $PWD
 end
@@ -47,7 +47,7 @@ func sshBase64(s string) string {
 // base64, and the script itself uses only double quotes.
 func sshBootstrap() string {
 	var b strings.Builder
-	b.WriteString(`d=$(mktemp -d "${TMPDIR:-/tmp}/gorex.XXXXXX") || exec "${SHELL:-/bin/sh}" -l
+	b.WriteString(`d=$(mktemp -d "${TMPDIR:-/tmp}/shellgrip.XXXXXX") || exec "${SHELL:-/bin/sh}" -l
 s=${SHELL:-/bin/sh}
 write() { printf %s "$2" | base64 -d > "$1" 2>/dev/null || printf %s "$2" | base64 -D > "$1" 2>/dev/null || printf %s "$2" | openssl base64 -d -A > "$1" 2>/dev/null; }
 case "$s" in

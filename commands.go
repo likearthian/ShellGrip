@@ -266,7 +266,7 @@ func (a *App) restartFocused() {
 	p := a.newPaneWithProfile(a.currentDir(), cols, rows, old.profile)
 	p.Tab, p.Node = t, old.Node
 	old.Node.Pane = p
-	old.closed = true
+	old.markClosed()
 	a.closeSFTPPane(old)
 	if old.term != nil {
 		old.term.Close()

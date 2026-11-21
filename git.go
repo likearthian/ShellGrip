@@ -20,6 +20,7 @@ import (
 const (
 	gitRefreshInterval    = 4 * time.Second
 	gitWSLRefreshInterval = 12 * time.Second
+	gitCacheLimit         = 128
 )
 
 // gitRef is a local branch, a remote branch, or a tag.
@@ -62,6 +63,7 @@ type gitRepo struct {
 // gitCacheEntry is a directory's repository, and when it was read last.
 // A nil repo means the directory is not in a repository.
 type gitCacheEntry struct {
+	used    time.Time
 	repo    *gitRepo
 	checked time.Time
 	loading bool
@@ -86,9 +88,29 @@ type gitHistory struct {
 
 // gitHistoryEntry is a repository's history, and when it was read last.
 type gitHistoryEntry struct {
+	used    time.Time
 	history *gitHistory
 	checked time.Time
 	loading bool
+}
+
+func (e *gitCacheEntry) lastUsed() time.Time   { return e.used }
+func (e *gitHistoryEntry) lastUsed() time.Time { return e.used }
+
+// makeGitCacheRoom evicts the least recently viewed directory before insertion.
+// In-flight reads keep their entry alive only until they finish.
+func makeGitCacheRoom[T interface{ lastUsed() time.Time }](entries map[string]T) {
+	for len(entries) >= gitCacheLimit {
+		oldest := ""
+		var used time.Time
+		first := true
+		for key, entry := range entries {
+			if first || entry.lastUsed().Before(used) {
+				oldest, used, first = key, entry.lastUsed(), false
+			}
+		}
+		delete(entries, oldest)
+	}
 }
 
 // gitHistoryFor returns the recent commits of a repository, starting a
@@ -105,9 +127,11 @@ func (a *App) gitHistoryFor(c *ui.Context, p *Pane, repo *gitRepo) *gitHistory {
 	}
 	entry := a.historyByDir[key]
 	if entry == nil {
+		makeGitCacheRoom(a.historyByDir)
 		entry = &gitHistoryEntry{}
 		a.historyByDir[key] = entry
 	}
+	entry.used = now
 	fresh := !entry.checked.IsZero() && now.Sub(entry.checked) < 10*time.Second
 	start := !fresh && !entry.loading
 	if start {
@@ -182,9 +206,11 @@ func (a *App) gitFor(c *ui.Context, p *Pane) *gitRepo {
 	}
 	entry := a.gitByDir[key]
 	if entry == nil {
+		makeGitCacheRoom(a.gitByDir)
 		entry = &gitCacheEntry{}
 		a.gitByDir[key] = entry
 	}
+	entry.used = now
 	// A directory outside a repository costs only a walk up its parents,
 	// and that answer is cached too, as repositories appear and go.
 	fresh := !entry.checked.IsZero() && now.Sub(entry.checked) < ttl
@@ -662,7 +688,7 @@ func writeCommitMessage(p *Pane, message string) (string, error) {
 // writeGitCommitMessage keeps a commit message in a file, which git reads
 // with commit -F, so that quotes and spaces reach it unchanged.
 func writeGitCommitMessage(message string) (string, error) {
-	file, err := os.CreateTemp("", "gorex-commit-*.txt")
+	file, err := os.CreateTemp("", "shellgrip-commit-*.txt")
 	if err != nil {
 		return "", err
 	}
@@ -683,9 +709,9 @@ func writeGitCommitMessage(message string) (string, error) {
 // writeWSLCommitMessage writes a commit message inside the distribution,
 // where its git can read it, and returns the Linux path.
 func writeWSLCommitMessage(p *Pane, message string) (string, error) {
-	name := fmt.Sprintf("/tmp/gorex-commit-%d-%d.txt", os.Getpid(), time.Now().UnixNano())
+	name := fmt.Sprintf("/tmp/shellgrip-commit-%d-%d.txt", os.Getpid(), time.Now().UnixNano())
 	args := append([]string(nil), p.profile.Command[1:]...)
-	args = append(args, "--exec", "sh", "-c", `cat > "$1"`, "gorex", name)
+	args = append(args, "--exec", "sh", "-c", `cat > "$1"`, "shellgrip", name)
 	cmd := exec.Command(p.profile.Command[0], args...)
 	configureEditorCommand(cmd)
 	cmd.Env = environmentWithoutSession()
@@ -708,7 +734,7 @@ func environmentWithoutSession() []string {
 	env := make([]string, 0, len(os.Environ()))
 	for _, value := range os.Environ() {
 		name, _, _ := strings.Cut(value, "=")
-		if !strings.EqualFold(name, "GOREX_SESSION") {
+		if !strings.EqualFold(name, "SHELLGRIP_SESSION") {
 			env = append(env, value)
 		}
 	}

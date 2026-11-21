@@ -4,10 +4,10 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 )
 
-const defaultTerminalTheme = "GoRex (follow appearance)"
+const defaultTerminalTheme = "ShellGrip (follow appearance)"
 
 var terminalLight, terminalDark = lightTerm, darkTerm
 
@@ -122,7 +122,7 @@ func (a *App) terminalThemeSettings(c *ui.Context, k *colors) {
 		})
 		theme := terminalThemeFor(c.Theme().Dark)
 		ui.Column(c).Padding(12).Gap(6).Radius(8).Background(theme.Background).Children(func() {
-			ui.Text(c, "user@gorex ~ $ echo hello").Font(termFont.Family).FontSize(12).TextColor(theme.Foreground).SingleLine()
+			ui.Text(c, "user@shellgrip ~ $ echo hello").Font(termFont.Family).FontSize(12).TextColor(theme.Foreground).SingleLine()
 			ui.Text(c, "hello · ready").Font(termFont.Family).FontSize(12).TextColor(theme.Palette[2]).SingleLine()
 			ui.Row(c).Gap(4).Children(func() {
 				for _, color := range theme.Palette {

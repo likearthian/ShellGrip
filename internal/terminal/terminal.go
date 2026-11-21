@@ -41,8 +41,8 @@ import (
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal/internal/pty"
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/pty"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // Padding is the room around a terminal's grid, in DIPs (Options.Padding).

@@ -6,7 +6,7 @@ import (
 	"runtime"
 
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 )
 
 // zero values preserve the terminal's defaults in older settings files.
@@ -99,5 +99,9 @@ func (a *App) terminalBehaviorSettings(c *ui.Context, k *colors) {
 			}
 			ui.Text(c, "Use Option for shell Meta shortcuts. Applies to new panes.").FontSize(11.5).TextColor(k.textFaint)
 		}
+		if ui.Checkbox(c, &prefs.CustomPrompt, "Use ShellGrip shell prompt").Changed() {
+			saveSettings()
+		}
+		ui.Text(c, "Override the shell prompt with ShellGrip's themed prompt and OSC 133 markers. Applies to new panes.").FontSize(11.5).TextColor(k.textFaint)
 	})
 }

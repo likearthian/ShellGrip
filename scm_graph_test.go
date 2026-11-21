@@ -58,7 +58,7 @@ func TestSCMGraphLayout(t *testing.T) {
 func graphTestPanel(t *testing.T) (*App, *ui.Tester) {
 	t.Helper()
 	registerFonts()
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	previous := prefs
 	t.Cleanup(func() { prefs = previous })
 	prefs.SCMGraphRatio = 0

@@ -121,7 +121,7 @@ func TestSSHRelaySharingAndStatus(t *testing.T) {
 }
 
 func TestRemotePreviewCacheIsolatedByHost(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	p := &Pane{profile: sshConnection{Host: "one", User: "u"}.profile()}
 	q := &Pane{profile: sshConnection{Host: "two", User: "u"}.profile()}
 	if remotePreviewPath(p, "/home/u/file.txt") == remotePreviewPath(q, "/home/u/file.txt") {

@@ -1,4 +1,4 @@
-// Package session runs the shells of GoRex's panes in pseudo-terminals and
+// Package session runs the shells of ShellGrip's panes in pseudo-terminals and
 // says what they run.
 //
 // A session lives as long as its pane: closing the pane hangs the shell up,
@@ -44,6 +44,9 @@ type Options struct {
 	Env     []string
 	Cols    int
 	Rows    int
+	// CustomPrompt injects ShellGrip's themed prompt and OSC 133 markers for
+	// supported interactive shells.
+	CustomPrompt bool
 }
 
 // Session is a pseudo-terminal of a pane and its shell.
@@ -76,7 +79,11 @@ func New(o Options) (*Session, error) {
 		dir, _ = os.UserHomeDir()
 	}
 	id := newID()
-	p, err := startPTY(path, argv, dir, sessionEnv(id, o.Env), cols, rows)
+	env := sessionEnv(id, o.Env)
+	if o.CustomPrompt {
+		argv, env = applyCustomPrompt(path, argv, name, env)
+	}
+	p, err := startPTY(path, argv, dir, env, cols, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +102,7 @@ func New(o Options) (*Session, error) {
 	return s, nil
 }
 
-// ID names the session, as GOREX_SESSION does in its environment.
+// ID names the session, as SHELLGRIP_SESSION does in its environment.
 func (s *Session) ID() string { return s.id }
 
 // Read reads what the program printed.
@@ -181,7 +188,7 @@ func sessionEnv(id string, extra []string) []string {
 			k == "COLUMNS", k == "LINES", k == "SHLVL", k == "OLDPWD", k == "PWD", k == "_",
 			strings.HasPrefix(k, "ITERM_"), strings.HasPrefix(k, "GHOSTTY_"), strings.HasPrefix(k, "KITTY_"),
 			strings.HasPrefix(k, "VSCODE_"), strings.HasPrefix(k, "WEZTERM_"), strings.HasPrefix(k, "ALACRITTY_"),
-			strings.HasPrefix(k, "GOREX_"), strings.HasPrefix(k, "MYGO_"):
+			strings.HasPrefix(k, "SHELLGRIP_"), strings.HasPrefix(k, "MYGO_"):
 			continue
 		case k == "LANG" || k == "LC_ALL" || k == "LC_CTYPE":
 			hasLang = true
@@ -191,9 +198,9 @@ func sessionEnv(id string, extra []string) []string {
 	env = append(env,
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
-		"TERM_PROGRAM=GoRex",
+		"TERM_PROGRAM=ShellGrip",
 		"TERM_PROGRAM_VERSION=0.1.0",
-		"GOREX_SESSION="+id,
+		"SHELLGRIP_SESSION="+id,
 	)
 	if !hasLang {
 		env = append(env, "LANG=en_US.UTF-8")

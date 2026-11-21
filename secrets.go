@@ -9,7 +9,7 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// secretStore is the OS keychain surface used by GoRex, swappable in tests.
+// secretStore is the OS keychain surface used by ShellGrip, swappable in tests.
 type secretStore interface {
 	Get(key string) ([]byte, error)
 	Set(key string, value []byte) error

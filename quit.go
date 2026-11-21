@@ -22,7 +22,7 @@ func (a *App) beforeQuit(e *mygo.QuitEvent) {
 	a.confirmQuit()
 }
 
-// beforeClose ends the app with the window: closing GoRex is finishing
+// beforeClose ends the app with the window: closing ShellGrip is finishing
 // work, not hiding it. What still runs asks first.
 func (a *App) beforeClose(e *mygo.CloseEvent) {
 	if a.exiting.Load() || a.quitting {
@@ -64,7 +64,7 @@ func (a *App) quitDialog(summary string) bool {
 	res, err := mygo.Dialog.Message(mygo.MessageOptions{
 		Parent:        a.win,
 		Type:          mygo.MessageWarning,
-		Title:         "Quit GoRex?",
+		Title:         "Quit ShellGrip?",
 		Message:       summary,
 		Detail:        "Quitting ends every session, with the programs in them.",
 		Buttons:       []string{"Quit", "Cancel"},

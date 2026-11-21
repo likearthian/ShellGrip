@@ -297,14 +297,14 @@ func TestRemoteTreeRefreshDoesNotBlink(t *testing.T) {
 	}
 	// A reload keeps the rows while the next read is in flight.
 	state.reload()
-	if !state.loaded || len(state.rows) != 1 || state.loading {
+	if !state.loaded || len(state.rows) != 1 || !state.loading {
 		t.Errorf("reload left loaded=%v loading=%v rows=%d", state.loaded, state.loading, len(state.rows))
 	}
-	// A toggle during a read drops the read, and a new one starts.
+	// A toggle invalidates the result, but waits for the read to finish.
 	state.loading = true
 	state.toggle("/home/u/srv")
-	if state.loading {
-		t.Error("a toggle kept the read in flight")
+	if !state.loading {
+		t.Error("a toggle allowed another read in flight")
 	}
 	if !state.loaded || len(state.rows) != 1 {
 		t.Error("a toggle dropped the rows before the new ones arrived")

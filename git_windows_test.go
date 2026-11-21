@@ -27,8 +27,8 @@ func TestLoadGitRepoWSL(t *testing.T) {
 	script := `set -e
 d=$(mktemp -d)
 git -C "$d" init -q -b main
-git -C "$d" config user.email gorex@example.invalid
-git -C "$d" config user.name "GoRex Test"
+git -C "$d" config user.email shellgrip@example.invalid
+git -C "$d" config user.name "ShellGrip Test"
 printf 'hello\n' > "$d/notes.txt"
 git -C "$d" add notes.txt
 git -C "$d" commit -qm first
@@ -71,8 +71,8 @@ func TestWSLGitRun(t *testing.T) {
 	script := `set -e
 d=$(mktemp -d)
 git -C "$d" init -q -b main
-git -C "$d" config user.email gorex@example.invalid
-git -C "$d" config user.name "GoRex Test"
+git -C "$d" config user.email shellgrip@example.invalid
+git -C "$d" config user.name "ShellGrip Test"
 printf 'hello\n' > "$d/notes.txt"
 printf '%s\n' "$d"`
 	out, err := exec.Command("wsl.exe", "--exec", "sh", "-c", script).CombinedOutput()
@@ -102,8 +102,8 @@ func TestLoadDiffWSL(t *testing.T) {
 	script := `set -e
 d=$(mktemp -d)
 git -C "$d" init -q -b main
-git -C "$d" config user.email gorex@example.invalid
-git -C "$d" config user.name "GoRex Test"
+git -C "$d" config user.email shellgrip@example.invalid
+git -C "$d" config user.name "ShellGrip Test"
 printf 'one\ntwo\n' > "$d/notes.txt"
 git -C "$d" add notes.txt
 git -C "$d" commit -qm first
@@ -186,7 +186,7 @@ func TestWriteWSLCommitMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(path, "/tmp/gorex-commit-") {
+	if !strings.HasPrefix(path, "/tmp/shellgrip-commit-") {
 		t.Fatalf("message path %q", path)
 	}
 	t.Cleanup(func() { exec.Command("wsl.exe", "--exec", "rm", "-f", path).Run() })

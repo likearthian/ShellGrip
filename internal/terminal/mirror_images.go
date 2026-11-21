@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // imageKey is a placement of an image as a Mirror placed it in the other

@@ -460,7 +460,7 @@ func (a *App) openGitPrompt(p *Pane, repo *gitRepo, kind string) {
 	switch kind {
 	case "commit":
 		prompt.title = "Commit changes"
-		prompt.detail = "Write a message. GoRex stages all changes, then commits them in this pane's shell."
+		prompt.detail = "Write a message. ShellGrip stages all changes, then commits them in this pane's shell."
 	case "branch":
 		prompt.title = "New branch"
 		prompt.detail = "The new branch starts at the current commit and is checked out."

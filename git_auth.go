@@ -82,7 +82,7 @@ func firstLine(message string) string {
 }
 
 // runAskpass is the helper git runs for a prompt: it prints the username
-// or password the app collected. GoRex starts in this mode when git runs
+// or password the app collected. ShellGrip starts in this mode when git runs
 // it through GIT_ASKPASS or SSH_ASKPASS.
 func runAskpass(path string, args []string) {
 	answer, err := askpassAnswer(path, args)
@@ -125,7 +125,7 @@ func nativeAskpass(creds gitCredentials) ([]string, func(), error) {
 		"GIT_ASKPASS=" + exe,
 		"SSH_ASKPASS=" + exe,
 		"SSH_ASKPASS_REQUIRE=force",
-		"GOREX_ASKPASS_SECRET=" + path,
+		"SHELLGRIP_ASKPASS_SECRET=" + path,
 	}
 	return env, func() { os.Remove(path) }, nil
 }
@@ -136,7 +136,7 @@ func writeAskpassSecret(creds gitCredentials) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	file, err := os.CreateTemp("", "gorex-askpass-*.json")
+	file, err := os.CreateTemp("", "shellgrip-askpass-*.json")
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +165,7 @@ func wslAskpass(p *Pane, creds gitCredentials) ([]string, func(), error) {
 	if p == nil || len(p.profile.Command) == 0 {
 		return nil, nil, fmt.Errorf("no WSL distribution command")
 	}
-	base := fmt.Sprintf("/tmp/gorex-askpass-%d-%d", os.Getpid(), time.Now().UnixNano())
+	base := fmt.Sprintf("/tmp/shellgrip-askpass-%d-%d", os.Getpid(), time.Now().UnixNano())
 	script, user, password := base+".sh", base+".user", base+".pass"
 	body := fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\n  *sername*|*ogin\\ for*) cat '%s' ;;\n  *) cat '%s' ;;\nesac\n", user, password)
 	if err := wslWriteFile(p, script, body, "700"); err != nil {
@@ -191,7 +191,7 @@ func wslAskpass(p *Pane, creds gitCredentials) ([]string, func(), error) {
 // wslWriteFile writes a file inside the pane's distribution, with mode.
 func wslWriteFile(p *Pane, path, content, mode string) error {
 	args := append([]string(nil), p.profile.Command[1:]...)
-	args = append(args, "--exec", "sh", "-c", `umask 077; cat > "$1"; chmod `+mode+` "$1"`, "gorex", path)
+	args = append(args, "--exec", "sh", "-c", `umask 077; cat > "$1"; chmod `+mode+` "$1"`, "shellgrip", path)
 	cmd := exec.Command(p.profile.Command[0], args...)
 	configureEditorCommand(cmd)
 	cmd.Env = environmentWithoutSession()

@@ -120,7 +120,7 @@ func deploySSHRelay(ctx context.Context, fs relayFS, home string, data []byte, c
 		return "", fmt.Errorf("remote home directory is unavailable")
 	}
 	sum := fmt.Sprintf("%x", sha256.Sum256(data))
-	dir := path.Join(home, ".cache", "gorex", "watchers")
+	dir := path.Join(home, ".cache", "shellgrip", "watchers")
 	target := path.Join(dir, "watch-"+sum)
 	if cached(target, sum) {
 		if err := fs.Chmod(target, 0700); err != nil {

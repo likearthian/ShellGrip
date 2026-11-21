@@ -5,13 +5,13 @@ import (
 	"os"
 	"testing"
 
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 )
 
 func TestTerminalBehaviorSettings(t *testing.T) {
 	previous := prefs
 	t.Cleanup(func() { prefs = previous })
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	prefs = settings{}
 	normalizeTerminalSettings()
 	o := terminalBehaviorOptions(terminal.Options{})

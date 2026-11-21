@@ -65,8 +65,8 @@ func TestLoadGitRepoChanges(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.email", "gorex@example.invalid")
-	runGit(t, dir, "config", "user.name", "GoRex Test")
+	runGit(t, dir, "config", "user.email", "shellgrip@example.invalid")
+	runGit(t, dir, "config", "user.name", "ShellGrip Test")
 	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -148,8 +148,8 @@ func TestLoadDiff(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.email", "gorex@example.invalid")
-	runGit(t, dir, "config", "user.name", "GoRex Test")
+	runGit(t, dir, "config", "user.email", "shellgrip@example.invalid")
+	runGit(t, dir, "config", "user.name", "ShellGrip Test")
 	notes := filepath.Join(dir, "notes.txt")
 	if err := os.WriteFile(notes, []byte("one\ntwo\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -260,8 +260,8 @@ func TestSourceControlDiffPreview(t *testing.T) {
 
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.email", "gorex@example.invalid")
-	runGit(t, dir, "config", "user.name", "GoRex Test")
+	runGit(t, dir, "config", "user.email", "shellgrip@example.invalid")
+	runGit(t, dir, "config", "user.name", "ShellGrip Test")
 	notes := filepath.Join(dir, "notes.txt")
 	if err := os.WriteFile(notes, []byte("one\ntwo\n"), 0o644); err != nil {
 		t.Fatal(err)

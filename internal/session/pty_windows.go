@@ -254,9 +254,9 @@ func shellCommand(cmd []string) (path string, argv []string, name string, err er
 // to its location, which cd changes alone, and reports it with OSC 7 so
 // splits can use it without process inspection. $? stays as the command left it, for the
 // prompt of the profile, which runs first.
-const powershellPrompt = `$global:__GoRexPrompt = $function:prompt; ` +
+const powershellPrompt = `$global:__ShellGripPrompt = $function:prompt; ` +
 	`function global:prompt { $ok = $global:?; ` +
 	`try { $l = $executionContext.SessionState.Path.CurrentLocation; ` +
 	`if ($l.Provider.Name -eq 'FileSystem') { [Environment]::CurrentDirectory = $l.ProviderPath; ` +
 	`[Console]::Write(([char]27) + ']7;' + ([uri]$l.ProviderPath).AbsoluteUri + ([char]7)) } } catch {}; ` +
-	`if (-not $ok) { Write-Error '' -ErrorAction Ignore }; & $global:__GoRexPrompt }`
+	`if (-not $ok) { Write-Error '' -ErrorAction Ignore }; & $global:__ShellGripPrompt }`

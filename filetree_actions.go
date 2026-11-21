@@ -12,11 +12,15 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// this menu holds a live tree, whose pane leads back to the tab's preview.
+// a non-string key keeps MyGo dev from serializing that graph every 300 ms.
+type fileTreeMenuKey struct{}
+
 func (a *App) fileTreeContextMenu(c *ui.Context, row ui.Element, root string, entry fileTreeRow) {
 	if entry.message {
 		return
 	}
-	state := ui.Local(row, "file-tree-menu", func() fileTreeMenuState { return fileTreeMenuState{} })
+	state := ui.Local(row, fileTreeMenuKey{}, func() fileTreeMenuState { return fileTreeMenuState{} })
 	if state.tree != a.fileTree {
 		state.open, state.tree = false, a.fileTree
 	}

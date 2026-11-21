@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 )
 
 func TestSplitUsesCurrentDirectory(t *testing.T) {
@@ -83,9 +83,9 @@ func TestWSLReportedDistributionPath(t *testing.T) {
 }
 
 func TestWSLSessionEnvironment(t *testing.T) {
-	t.Setenv("WSLENV", "EDITOR/u:GOREX_SESSION/w:MY_VAR/p")
+	t.Setenv("WSLENV", "EDITOR/u:SHELLGRIP_SESSION/w:MY_VAR/p")
 	profile := terminalProfile{WSL: true}
-	want := "WSLENV=EDITOR/u:MY_VAR/p:GOREX_SESSION"
+	want := "WSLENV=EDITOR/u:MY_VAR/p:SHELLGRIP_SESSION"
 	if env := profile.environment(); len(env) != 1 || env[0] != want {
 		t.Fatalf("WSL forwarding = %q, want %q", env, want)
 	}

@@ -28,7 +28,7 @@ func wslRelayPath(ctx context.Context, distro string) (string, error) {
 	}
 	setup := exec.CommandContext(ctx, "wsl.exe", "-d", distro, "--exec", "sh", "-s")
 	configureEditorCommand(setup)
-	setup.Stdin = strings.NewReader("set -eu\numask 077\nuname -m\nd=\"${XDG_CACHE_HOME:-$HOME/.cache}/gorex/wslwatch\"\nmkdir -p -- \"$d\"\nprintf '%s\\n' \"$d\"\n")
+	setup.Stdin = strings.NewReader("set -eu\numask 077\nuname -m\nd=\"${XDG_CACHE_HOME:-$HOME/.cache}/shellgrip/wslwatch\"\nmkdir -p -- \"$d\"\nprintf '%s\\n' \"$d\"\n")
 	out, err := setup.Output()
 	if err != nil {
 		return "", fmt.Errorf("WSL relay setup: %w", err)

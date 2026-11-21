@@ -232,7 +232,7 @@ func TestCtrlCReachesProgramWithSelection(t *testing.T) {
 	}
 }
 
-func TestGoRexTerminalKeybinds(t *testing.T) {
+func TestShellGripTerminalKeybinds(t *testing.T) {
 	for _, platform := range []string{"darwin", "windows", "linux"} {
 		t.Run(platform, func(t *testing.T) {
 			term := &Terminal{binds: defaultKeybinds(platform)}

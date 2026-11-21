@@ -44,7 +44,7 @@ const (
 	maxRichPreviewLine = 4096
 	// maxRichMarkdownBlocks bounds the blocks a Markdown preview renders as
 	// one column: past it, a virtualized list keeps scrolling smooth.
-	maxRichMarkdownBlocks = 400
+	maxRichMarkdownBlocks = 40
 	previewChunkRunes     = 1024
 	previewTabWidth       = 4
 )
@@ -130,6 +130,12 @@ func (a *App) openFilePreview(c *ui.Context, p *Pane, path string) {
 	}
 }
 
+func (p *filePreview) cleanup() {
+	if p != nil && p.source != "" && p.path != "" {
+		os.Remove(p.path)
+	}
+}
+
 // showPreview opens path in the tab's preview, naming source when path is
 // a cache of a remote file.
 func (a *App) showPreview(p *Pane, path, source string, places ...terminalFilePlace) {
@@ -139,6 +145,9 @@ func (a *App) showPreview(p *Pane, path, source string, places ...terminalFilePl
 	}
 	if t == nil || t.Settings {
 		return
+	}
+	if t.preview != nil && t.preview.path != path {
+		t.preview.cleanup()
 	}
 	preview := &filePreview{path: path, source: source, pane: p, loading: true}
 	t.preview = preview
@@ -176,9 +185,14 @@ func (a *App) loadFilePreview(t *Tab, preview *filePreview, places ...terminalFi
 				preview.fileStamp = stamp
 				preview.initialized = false
 				preview.codeBox, preview.gutterBox = ui.Rect{}, ui.Rect{}
+				preview.selection, preview.copyDisplay, preview.copySource = [2]int{}, "", ""
 				if len(places) > 0 && places[0].line > 0 {
 					line := min(places[0].line, strings.Count(string(initial.source), "\n")+1)
-					preview.scroll.Y = float32(max(0, line-3)) * 21
+					if initial.kind == "markdown" && len(initial.blocks) > maxRichMarkdownBlocks {
+						preview.markdown.ScrollTo(markdownBlockForLine(initial.source, initial.blocks, line), ui.Start)
+					} else {
+						preview.scroll.Y = float32(max(0, line-3)) * 21
+					}
 				}
 			}
 		})
@@ -202,6 +216,7 @@ func (a *App) openDiffPreview(c *ui.Context, p *Pane, repo *gitRepo, file gitFil
 	if t == nil || t.Settings {
 		return
 	}
+	t.preview.cleanup()
 	subtitle := "Changes"
 	if staged {
 		subtitle = "Staged changes"
@@ -225,6 +240,7 @@ func (a *App) openDiffPreview(c *ui.Context, p *Pane, repo *gitRepo, file gitFil
 }
 
 func (a *App) closeFilePreview(t *Tab) {
+	t.preview.cleanup()
 	t.preview = nil
 	if a.tab() == t {
 		a.focusReq = t.Focus
@@ -361,7 +377,9 @@ func loadPreview(path string) previewContent {
 					if link, parseErr := url.Parse(string(block.Destination)); parseErr == nil && link.Scheme == "" && link.Host == "" {
 						imagePath := filepath.Join(filepath.Dir(path), filepath.FromSlash(link.Path))
 						if previewImageType(strings.ToLower(filepath.Ext(imagePath))) {
-							content.images[n] = loadPreview(imagePath).image
+							if img := loadPreview(imagePath).image; img != nil {
+								content.images[n] = img
+							}
 						}
 					}
 				}
@@ -642,26 +660,52 @@ func (content *previewContent) highlightLargeText() {
 	}
 }
 
+// markdownBlockForLine returns the top-level block index nearest to the 1-based line.
+func markdownBlockForLine(source []byte, blocks []ast.Node, line int) int {
+	if len(blocks) == 0 || line <= 1 {
+		return 0
+	}
+	offset := 0
+	for cur := 1; cur < line && offset < len(source); offset++ {
+		if source[offset] == '\n' {
+			cur++
+		}
+	}
+	best := 0
+	for i, b := range blocks {
+		if lines := b.Lines(); lines != nil && lines.Len() > 0 {
+			if lines.At(0).Start <= offset {
+				best = i
+			} else {
+				break
+			}
+		}
+	}
+	return best
+}
+
 // markdownPreview renders the document's blocks in the preview's scrolling
 // area. A List builds only the blocks in view, so a long document costs what
 // its visible page does, not what all of it does; a shorter one scrolls as
 // one column, which lets Select All take all of it.
 func (a *App) markdownPreview(c *ui.Context, k *colors, p *filePreview) {
 	if len(p.content.blocks) <= maxRichMarkdownBlocks {
-		ui.Scroll(c).TrackScroll(&p.scroll).Grow(1).MinHeight(0).Padding(24).Children(func() {
-			ui.Column(c).Gap(10).MinWidth(0).Selectable().Children(func() {
+		sc := ui.Scroll(c.Key("markdown-scroll")).TrackScroll(&p.scroll).Grow(1).MinHeight(0).Padding(28, 36)
+		sc.Children(func() {
+			ui.Column(c).Gap(14).MaxWidth(760).WidthPercent(100).AlignSelf(ui.Center).MinWidth(0).Selectable().Children(func() {
 				previewMarkdown(c, k, &p.content, p.content.document)
 			})
 		})
 		return
 	}
-	ui.Column(c).Grow(1).MinHeight(0).MinWidth(0).Selectable().Children(func() {
-		ui.List(c, &p.markdown, len(p.content.blocks), func(i int) {
-			ui.Column(c).Gap(10).MinWidth(0).Children(func() {
-				previewMarkdownBlock(c, k, &p.content, p.content.blocks[i])
-			})
-		}).Grow(1).MinHeight(0).MinWidth(0).Padding(24).Gap(10).Label("Markdown preview")
-	})
+	if p.markdown.Key == nil {
+		p.markdown.Key = func(row int) any { return row }
+	}
+	ui.List(c.Key("markdown-list"), &p.markdown, len(p.content.blocks), func(i int) {
+		ui.Column(c).Gap(14).MaxWidth(760).WidthPercent(100).AlignSelf(ui.Center).MinWidth(0).Selectable().Children(func() {
+			previewMarkdownBlock(c, k, &p.content, p.content.blocks[i])
+		})
+	}).Grow(1).MinHeight(0).MinWidth(0).Padding(28, 36).Gap(14).Label("Markdown preview")
 }
 
 func (a *App) largeTextPreview(c *ui.Context, k *colors, p *filePreview) {

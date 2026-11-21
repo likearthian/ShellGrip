@@ -17,9 +17,9 @@ import (
 
 // opt in because this starts a distribution and measures real filesystem I/O.
 func TestWSLFileWatchPerformance(t *testing.T) {
-	distro := os.Getenv("GOREX_TEST_WSL_WATCH")
+	distro := os.Getenv("SHELLGRIP_TEST_WSL_WATCH")
 	if distro == "" {
-		t.Skip("set GOREX_TEST_WSL_WATCH to the distribution to measure")
+		t.Skip("set SHELLGRIP_TEST_WSL_WATCH to the distribution to measure")
 	}
 	run := func(script string) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -29,11 +29,11 @@ func TestWSLFileWatchPerformance(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return strings.TrimSpace(string(out)), err
 	}
-	root, err := run("mktemp -d /tmp/gorex-watch-XXXXXXXX")
+	root, err := run("mktemp -d /tmp/shellgrip-watch-XXXXXXXX")
 	if err != nil {
 		t.Skipf("WSL unavailable: %v: %s", err, root)
 	}
-	if !strings.HasPrefix(root, "/tmp/gorex-watch-") || strings.ContainsAny(root, "'\n\r") {
+	if !strings.HasPrefix(root, "/tmp/shellgrip-watch-") || strings.ContainsAny(root, "'\n\r") {
 		t.Fatalf("unexpected fixture path %q", root)
 	}
 	t.Cleanup(func() { run("rm -f -- '" + root + "/probe.txt' '" + root + "/save.tmp'; rmdir -- '" + root + "'") })
@@ -145,9 +145,9 @@ func TestWSLFileWatchPerformance(t *testing.T) {
 }
 
 func TestWSLFileWatchRecursiveAndFile(t *testing.T) {
-	distro := os.Getenv("GOREX_TEST_WSL_WATCH")
+	distro := os.Getenv("SHELLGRIP_TEST_WSL_WATCH")
 	if distro == "" {
-		t.Skip("set GOREX_TEST_WSL_WATCH to run Linux integration checks")
+		t.Skip("set SHELLGRIP_TEST_WSL_WATCH to run Linux integration checks")
 	}
 	run := func(script string) string {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -160,8 +160,8 @@ func TestWSLFileWatchRecursiveAndFile(t *testing.T) {
 		}
 		return strings.TrimSpace(string(out))
 	}
-	base := run("mktemp -d /tmp/gorex-watch-XXXXXXXX")
-	if !strings.HasPrefix(base, "/tmp/gorex-watch-") || strings.ContainsAny(base, "'\r\n") {
+	base := run("mktemp -d /tmp/shellgrip-watch-XXXXXXXX")
+	if !strings.HasPrefix(base, "/tmp/shellgrip-watch-") || strings.ContainsAny(base, "'\r\n") {
 		t.Fatal("invalid fixture path")
 	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }

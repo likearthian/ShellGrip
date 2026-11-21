@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 )
 
 type vscodeLaunch struct{ editor, directory string }

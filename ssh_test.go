@@ -82,7 +82,7 @@ func TestSSHBootstrap(t *testing.T) {
 			t.Errorf("the bootstrap lacks the %s hook", name)
 		}
 	}
-	if !strings.Contains(bashRC, "__gorex_osc7") || !strings.Contains(zshRC, "precmd_functions") ||
+	if !strings.Contains(bashRC, "__shellgrip_osc7") || !strings.Contains(zshRC, "precmd_functions") ||
 		!strings.Contains(fishHook, "fish_prompt") {
 		t.Error("a hook does not report the folder")
 	}
@@ -161,7 +161,7 @@ Host quoted
 
 func TestImportSSHConnections(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	dir := filepath.Join(home, ".ssh")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestImportSSHConnections(t *testing.T) {
 }
 
 func TestSSHConnectionsFile(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	conns := []sshConnection{
 		{ID: "one", Name: "omni", Alias: "omni", Port: 22},
 		{ID: "two", Name: "Box", User: "u", Host: "box.local", Port: 2222},

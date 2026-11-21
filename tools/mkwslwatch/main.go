@@ -1,4 +1,4 @@
-// mkwslwatch builds the static Linux relays shipped with GoRex.
+// mkwslwatch builds the static Linux relays shipped with ShellGrip.
 package main
 
 import (

@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // The padding around the grid when Options.Padding leaves it zero, in

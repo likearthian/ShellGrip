@@ -67,7 +67,7 @@ type Keybind struct {
 }
 
 // DefaultKeybinds returns the keys a terminal binds unless
-// Options.NoDefaultKeybinds, with GoRex's copy, paste and tab shortcuts:
+// Options.NoDefaultKeybinds, with ShellGrip's copy, paste and tab shortcuts:
 //
 //   - on macOS, Command+C copies and Command+V pastes, Command+A selects
 //     all, Control+V also pastes, Command+K clears the screen, Command+= (and +) and Command+-

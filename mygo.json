@@ -1,8 +1,8 @@
 {
-  "name": "GoRex",
-  "identifier": "dev.gorex.app",
-  "version": "0.5.1",
-  "copyright": "A replica of Superlogical's Rex, built with MyGo",
+  "name": "ShellGrip",
+  "identifier": "dev.shellgrip.app",
+  "version": "0.6.0",
+  "copyright": "A native terminal workspace, forked from GoRex and built with MyGo",
   "out": "build",
   "buildCommand": "go run ./tools/mkwslwatch",
   "macos": { "minimumSystemVersion": "13.0" }

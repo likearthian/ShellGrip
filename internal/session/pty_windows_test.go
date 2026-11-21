@@ -45,7 +45,7 @@ func TestExplicitPowerShellProfile(t *testing.T) {
 // process that a console of its own cannot interrupt, as a terminal app
 // runs without one: the program must still take the interrupt.
 func TestCtrlC(t *testing.T) {
-	switch os.Getenv("GOREX_TEST_CTRLC") {
+	switch os.Getenv("SHELLGRIP_TEST_CTRLC") {
 	case "console":
 		ctrlCConsole(t)
 		return
@@ -61,7 +61,7 @@ func TestCtrlC(t *testing.T) {
 		return
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestCtrlC$", "-test.v")
-	cmd.Env = append(os.Environ(), "GOREX_TEST_CTRLC=console")
+	cmd.Env = append(os.Environ(), "SHELLGRIP_TEST_CTRLC=console")
 	cmd.SysProcAttr = detached()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -69,7 +69,7 @@ func TestCtrlC(t *testing.T) {
 }
 
 func ctrlCConsole(t *testing.T) {
-	os.Setenv("GOREX_TEST_CTRLC", "program")
+	os.Setenv("SHELLGRIP_TEST_CTRLC", "program")
 	p, err := startPTY(os.Args[0], []string{os.Args[0], "-test.run=^TestCtrlC$"}, os.TempDir(), os.Environ(), 80, 24)
 	if err != nil {
 		t.Fatal(err)

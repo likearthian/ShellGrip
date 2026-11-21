@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 )
@@ -29,6 +30,7 @@ type sftpSession struct {
 	password         string
 	rememberPassword bool
 	closed           bool
+	treeReading      bool
 }
 
 // sftpFor returns the pane's session, making one when it has none yet.
@@ -90,25 +92,34 @@ func (s *sftpSession) connect() {
 	s.needPassword = false
 	password := s.password
 	remember := s.rememberPassword
+	parent := s.watchCtx
 	go func() {
 		if password == "" {
 			password = loadSSHPassword(*conn)
 		}
-		fs, closeFS, err := dialSFTP(*conn, password)
+		dialCtx, cancel := context.WithTimeout(parent, 30*time.Second)
+		fs, closeFS, err := dialSFTPContext(dialCtx, *conn, password)
 		home := ""
 		if err == nil {
-			home, _ = fs.Getwd()
-			if remember && password != "" {
+			home, err = sftpHome(dialCtx, fs, closeFS)
+			if err == nil && remember && password != "" {
 				saveSSHPassword(*conn, password)
 			}
 		} else if errors.Is(err, errSSHAuth) {
 			deleteSSHPassword(*conn)
 		}
+		cancel()
+		if parent.Err() != nil {
+			if err == nil && closeFS != nil {
+				closeFS()
+			}
+			return
+		}
 		mygo.RunOnMain(func() {
 			if s.closed {
 				s.connecting = false
-				if err == nil {
-					closeFS()
+				if err == nil && closeFS != nil {
+					go closeFS()
 				}
 				return
 			}
@@ -128,6 +139,21 @@ func (s *sftpSession) connect() {
 			s.notify()
 		})
 	}()
+}
+
+// sftpHome keeps setup cancellation attached until the first request finishes.
+func sftpHome(ctx context.Context, fs remoteFS, closeFS func()) (string, error) {
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		closeFS()
+		close(done)
+	})
+	home, _ := fs.Getwd()
+	if !stop() {
+		<-done
+		return "", ctx.Err()
+	}
+	return home, nil
 }
 
 func (s *sftpSession) close() {

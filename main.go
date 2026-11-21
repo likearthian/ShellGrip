@@ -1,4 +1,4 @@
-// GoRex is a terminal of tabs and split panes, after Superlogical's Rex,
+// ShellGrip is a terminal of tabs and split panes, forked from GoRex,
 // in MyGo's native UI. Its shells run in pseudo-terminals of the window:
 // closing the window ends them, as it ends the app.
 //
@@ -15,7 +15,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"gorex/internal/session"
+	"shellgrip/internal/session"
 )
 
 // manifestData is the app's own mygo.json, embedded so version and
@@ -36,7 +36,7 @@ type appManifest struct {
 	Copyright string `json:"copyright"`
 }
 
-// appVersion is the packaged app's version, or the manifest's when GoRex
+// appVersion is the packaged app's version, or the manifest's when ShellGrip
 // runs from source, where its executable carries none.
 func appVersion() string {
 	if v := mygo.App.Version(); v != "" {
@@ -46,13 +46,13 @@ func appVersion() string {
 }
 
 func main() {
-	// Git runs GoRex itself for an askpass prompt, with the secret in the
+	// Git runs ShellGrip itself for an askpass prompt, with the secret in the
 	// environment. Answer it before anything of the app starts.
-	if secret := os.Getenv("GOREX_ASKPASS_SECRET"); secret != "" {
+	if secret := os.Getenv("SHELLGRIP_ASKPASS_SECRET"); secret != "" {
 		runAskpass(secret, os.Args[1:])
 		return
 	}
-	// One GoRex per user: a taskbar launch while it runs would otherwise
+	// One ShellGrip per user: a taskbar launch while it runs would otherwise
 	// start a second GUI over the same data directory. Hand such a launch
 	// to the running instance (see OnSecondInstance) and let this process
 	// exit.
@@ -60,11 +60,11 @@ func main() {
 		return
 	}
 	// The state of the window lives in the app's data directory, which
-	// dev builds take from GOREX_DIR: "GoRex", or "GoRex Dev" under mygo
+	// dev builds take from SHELLGRIP_DIR: "ShellGrip", or "ShellGrip Dev" under mygo
 	// dev, which keeps the installed app's state apart.
-	if os.Getenv("GOREX_DIR") == "" {
+	if os.Getenv("SHELLGRIP_DIR") == "" {
 		if dir, err := mygo.App.Path(mygo.PathUserData); err == nil {
-			os.Setenv("GOREX_DIR", dir)
+			os.Setenv("SHELLGRIP_DIR", dir)
 		}
 	}
 	registerFonts()
@@ -97,7 +97,7 @@ func (a *App) open() {
 	a.profiles = discoverProfiles()
 	a.sshConns = loadSSHConnections()
 	opts := mygo.WindowOptions{
-		Title:                "GoRex",
+		Title:                "ShellGrip",
 		Width:                1000,
 		Height:               620,
 		MinWidth:             560,
@@ -141,7 +141,7 @@ func (a *App) open() {
 		a.quitting = true
 		for _, t := range a.tabs {
 			for _, p := range t.panes() {
-				p.closed = true
+				p.markClosed()
 				if p.sess != nil {
 					p.sess.Kill() // quitting ends the programs, at once
 				}
@@ -200,7 +200,7 @@ func (a *App) reset() {
 	a.copiedCharacters = 0
 	a.paletteOpen, a.hostOpen, a.aboutOpen, a.renaming = false, false, false, nil
 	a.gitMenu, a.gitPrompt, a.gitAuth = gitMenuState{}, gitPromptState{}, gitAuthState{}
-	a.scmDir, a.scmMessage, a.scmExpanded = "", "", nil
+	a.scmDir, a.scmMessage, a.scmMessages, a.scmExpanded = "", "", nil, nil
 	a.saveDue, a.quitting, a.lastSnapshot, a.title = false, false, "", ""
 	a.confirming = false
 	a.exiting.Store(false)

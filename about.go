@@ -15,7 +15,7 @@ func (a *App) aboutDialog(c *ui.Context, k *colors) {
 		ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
 			ui.Image(c, appLogo).Size(46, 46).Fit(ui.Contain)
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-				ui.Text(c, "GoRex").FontSize(17).FontWeight(700).TextColor(k.text)
+				ui.Text(c, "ShellGrip").FontSize(17).FontWeight(700).TextColor(k.text)
 				ui.Text(c, "Version "+appVersion()).FontSize(12.5).TextColor(k.textMuted).Selectable()
 			})
 		})
@@ -24,8 +24,8 @@ func (a *App) aboutDialog(c *ui.Context, k *colors) {
 			"Icons: Lucide (ISC) and Simple Icons (CC0). Font: JetBrains Mono (OFL).").
 			FontSize(12).TextColor(k.textMuted).LineHeight(1.4).Selectable()
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.Button(c, "Rex").Clicked() {
-				c.OpenURL("https://www.superlogical.com/updates/public-testing-beginning")
+			if ui.Button(c, "GoRex").Clicked() {
+				c.OpenURL("https://github.com/egoist/gorex")
 			}
 			if ui.Button(c, "MyGo").Clicked() {
 				c.OpenURL("https://mygo.egoist.dev")

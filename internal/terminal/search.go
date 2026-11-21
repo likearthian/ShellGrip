@@ -3,7 +3,7 @@ package terminal
 import (
 	"time"
 
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // SearchStatus is how a search of the terminal goes (Terminal.Search,

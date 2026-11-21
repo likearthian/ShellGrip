@@ -95,9 +95,9 @@ func (a *App) hostPanel(c *ui.Context, k *colors, name, glyph string) {
 		row("Memory", a.ramLabel())
 		row("Version", appVersion())
 	})
-	ui.Text(c, "Sessions run in this window: closing GoRex ends them, after asking about the programs that still run.").
+	ui.Text(c, "Sessions run in this window: closing ShellGrip ends them, after asking about the programs that still run.").
 		FontSize(11.5).TextColor(k.textFaint).LineHeight(1.35)
-	if ui.Button(c, "About").Tooltip("About GoRex").Clicked() {
+	if ui.Button(c, "About").Tooltip("About ShellGrip").Clicked() {
 		a.hostOpen, a.aboutOpen = false, true
 	}
 }

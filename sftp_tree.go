@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/appdir"
+	"shellgrip/internal/appdir"
 )
 
 // remoteTreeState is the sidebar's view of an SSH pane's folder: what the
@@ -90,10 +90,11 @@ func (a *App) refreshRemoteTree(c *ui.Context, p *Pane) *remoteTreeState {
 // and again five seconds later as the local tree does. The rows shown stay
 // until the new ones arrive, so a refresh never blinks.
 func (s *remoteTreeState) load(services ui.Services) {
-	if s.session == nil || s.session.fs == nil || s.root == "" {
+	if s.loading || s.session == nil || s.session.treeReading || s.session.fs == nil || s.root == "" {
 		return
 	}
 	s.loading = true
+	s.session.treeReading = true
 	s.revision++
 	revision := s.revision
 	root := s.root
@@ -102,11 +103,14 @@ func (s *remoteTreeState) load(services ui.Services) {
 		expanded[dir] = open
 	}
 	fs := s.session.fs
+	session := s.session
 	app := s.app()
 	go func() {
 		rows, rootErr := readRemoteFileTree(fs, root, expanded)
 		app.post(func() {
-			if app.remoteTree != s || s.revision != revision {
+			session.treeReading = false
+			s.loading = false
+			if app.remoteTree != s || session.fs != fs || s.revision != revision {
 				return
 			}
 			if sftpConnLost(rootErr) {
@@ -168,18 +172,16 @@ func readRemoteFileTree(fs remoteFS, root string, expanded map[string]bool) ([]f
 func (s *remoteTreeState) app() *App { return s.session.app }
 
 // toggle opens or folds a folder, reading the tree again. The read in
-// flight is dropped, and the rows shown stay until the new ones arrive.
+// flight finishes before its replacement starts; the rows shown stay until then.
 func (s *remoteTreeState) toggle(dir string) {
 	s.expanded[dir] = !s.expanded[dir]
 	s.next = time.Time{}
-	s.loading = false
 	s.revision++
 }
 
 // reload reads the tree again, as the refresh button asks.
 func (s *remoteTreeState) reload() {
 	s.next = time.Time{}
-	s.loading = false
 	s.revision++
 }
 
@@ -228,7 +230,11 @@ func (a *App) remoteTreePanel(c *ui.Context, k *colors, p *Pane, width float32) 
 				case message != "":
 					return "remote-tree-message"
 				}
-				return s.rows[row-1].path
+				r := s.rows[row-1]
+				if r.message {
+					return "remote-tree-msg:" + r.path
+				}
+				return r.path
 			}
 			ui.List(c, &s.list, rows, func(i int) {
 				switch {

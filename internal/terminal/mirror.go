@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"gorex/internal/terminal/internal/vt"
+	"shellgrip/internal/terminal/internal/vt"
 )
 
 // Mirror frames what a terminal shows for another terminal to show, as a

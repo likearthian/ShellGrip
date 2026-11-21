@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**GoRex** (`module gorex`, identifier `dev.gorex.app`) is a replica of Superlogical's Rex terminal, written in Go with [MyGo](https://mygo.egoist.dev)'s native UI and its terminal plugin (Ghostty's libghostty-vt). No webview, **no cgo**: a native app. It is a multi-tab, split-pane terminal emulator whose shells run in pseudo-terminals of the app itself (closing the window ends them, after asking about the programs that still run), with a file tree sidebar, a full Source Control sidebar (staging, side-by-side diffs, commit graph, branch menu with askpass), file previews (chroma/goldmark/images), VS Code Remote–WSL integration, and themes. Targets macOS (primary), Windows 10 1809+ (ConPTY/WSL), Linux. The single source of user documentation is `README.md` — keep it current with code changes.
+**ShellGrip** (`module shellgrip`, identifier `dev.shellgrip.app`) is a native terminal workspace forked from GoRex, written in Go with [MyGo](https://mygo.egoist.dev)'s native UI and its terminal plugin (Ghostty's libghostty-vt). No webview, **no cgo**: a native app. It is a multi-tab, split-pane terminal emulator whose shells run in pseudo-terminals of the app itself (closing the window ends them, after asking about the programs that still run), with a file tree sidebar, a full Source Control sidebar (staging, side-by-side diffs, commit graph, branch menu with askpass), file previews (chroma/goldmark/images), VS Code Remote–WSL integration, and themes. Targets macOS (primary), Windows 10 1809+ (ConPTY/WSL), Linux. The single source of user documentation is `README.md` — keep it current with code changes.
 
 ## Architecture & Data Flow
 
@@ -13,7 +13,7 @@ GUI (root package main, MyGo ui) → Pane{term, sess} → internal/session (PTY 
                                    Layout ⇄ layout.json
 ```
 
-- `main()` dispatch order (`main.go`): `GOREX_ASKPASS_SECRET` set → git askpass mode (`runAskpass`, `git_auth.go`); else set `GOREX_DIR` from the app data dir, `registerFonts()`, `loadSettings()`, then `App.open()` creates the window with `Content: ui.View(a.view)`, restores the saved layout with new shells, and closes the app with it (`beforeQuit`/`beforeClose` in `quit.go`).
+- `main()` dispatch order (`main.go`): `SHELLGRIP_ASKPASS_SECRET` set → git askpass mode (`runAskpass`, `git_auth.go`); else set `SHELLGRIP_DIR` from the app data dir, `registerFonts()`, `loadSettings()`, then `App.open()` creates the window with `Content: ui.View(a.view)`, restores the saved layout with new shells, and closes the app with it (`beforeQuit`/`beforeClose` in `quit.go`).
 - **Quit semantics:** closing the window quits. When a pane runs a program (`!info.Idle`) or an SSH connection is open, `workSummary()` (`quit.go`) stops the quit and a native `Dialog.Message` asks; tests answer through `App.askQuit`.
 - **Immediate-mode UI, NOT bubbletea.** `func (a *App) view(c *ui.Context)` (`view.go`) rebuilds the UI each frame via `ui.Column/Row/Box/...` builders. There is no Model/Update/Init.
 - **Async pattern:** mutations from goroutines go through `a.post(fn)` / `a.later(c, fn)` and drain in `runPosted()` at the top of every frame (`state.go`); terminal callbacks and the per-pane `watch()` goroutines marshal via `a.onUI(fn)` (window `Update`, or `post` in a view without one); `watch()` ticks 500 ms calling `sess.Info()`; view-level timers use `c.After(...)` (e.g. 2 s file-tree/git refresh; `gitRefreshInterval=4s`, `gitWSLRefreshInterval=12s` in `git.go`).
@@ -29,7 +29,7 @@ GUI (root package main, MyGo ui) → Pane{term, sess} → internal/session (PTY 
 `sftp*.go` (the SFTP connection and the remote file tree of SSH tabs),
 `quit.go`/`clipboard.go`/`debug.go` |
 | `internal/session/` | the panes' sessions: `New`/`Close`/`Info`, PTY + process inspection per OS (`pty_*.go`, `proc_*.go`), the host's details |
-| `internal/appdir/` | `Dir()`: the app's data directory (`GOREX_DIR`) |
+| `internal/appdir/` | `Dir()`: the app's data directory (`SHELLGRIP_DIR`) |
 | `internal/terminal/` | **vendored copy** of MyGo's terminal plugin (see `UPSTREAM.md`); sub-`internal/pty`, `internal/vt` (purego FFI to libghostty-vt), `library.go` (lib load/download) |
 | `assets/` | embedded SVG icons (Lucide), brand SVGs (Simple Icons), JetBrains Mono + Inter fonts |
 | `resources/` | `icon.png` (embedded by `programs.go` for the About dialog), logo iterations + AI prompt provenance `.md` files |
@@ -43,9 +43,9 @@ GUI (root package main, MyGo ui) → Pane{term, sess} → internal/session (PTY 
 No CI, no Makefile/scripts — these are the workflow:
 
 ```sh
-go tool mygo dev        # "GoRex Dev": hot rebuild+restart; own data dir "GoRex Dev"
+go tool mygo dev        # "ShellGrip Dev": hot rebuild+restart; own data dir "ShellGrip Dev"
 go test ./...           # sessions + view without a window (the standard gate)
-go tool mygo build      # build/<os-arch>/GoRex.app + .dmg (mac) / GoRex.exe + Setup .exe (win)
+go tool mygo build      # build/<os-arch>/ShellGrip.app + .dmg (mac) / ShellGrip.exe + Setup .exe (win)
 go run ./tools/mkicon   # refresh the app icon
 go run ./tools/mkwslwatch # prepare Linux relays for WSL dev/tests; mygo build runs this automatically
 go get -tool github.com/egoist/mygo/cmd/mygo@latest   # update MyGo + CLI together
@@ -63,14 +63,14 @@ Single test: `go test -run TestLoadGitRepo .`; subpackages: `go test ./internal/
 - **State:** no DI framework; package globals (`prefs`, `termFont`, `terminalLight/Dark`, git caches, `svgs`, `fades`). Cross-goroutine fields use `atomic.Int64/Bool`; caches guarded by `sync.Mutex`.
 - **Comments:** dense, lowercase, declarative sentence-style doc comments with inline rationale. Match this voice.
 - **Embeds:** `//go:embed assets/icons/*.svg assets/brands/*.svg` and `resources/icon.png` (`programs.go`), fonts (`style.go`), `mygo-plugin.json` (`internal/terminal/`).
-- **Data dir files** live in `appdir.Dir()` (`GOREX_DIR` override; else `~/Library/Application Support/GoRex[ Dev]` / `%AppData%\GoRex`): `layout.json`, `settings.json`, `ssh.json` — dirs `0700`, files `0600`. Never let dev and production builds share a data dir.
-- **Vendored terminal plugin:** `internal/terminal` mirrors `github.com/egoist/mygo/plugins/terminal` at the pinned version. On MyGo updates, re-sync production files and `internal/download`, and re-apply local deltas per `internal/terminal/UPSTREAM.md` (English labels, import paths, keybindings). Copy-on-select uses upstream's enum and `OnCopy`; GoRex filters program copies and handles `OnZoom` to keep all panes' saved font size in step.
-- **Git execution:** backend-side via `gitOutput` (4 s timeout, 12 s for WSL; WSL panes run `wsl.exe -d <distro> git …`), never by typing into the pane shell. Ref inputs validated against `gitRefNamePattern`/`gitRevisionPattern`. Credentials handled by re-execing the binary as askpass with `GOREX_ASKPASS_SECRET` (0600 secret file).
+- **Data dir files** live in `appdir.Dir()` (`SHELLGRIP_DIR` override; else `~/Library/Application Support/ShellGrip[ Dev]` / `%AppData%\ShellGrip`): `layout.json`, `settings.json`, `ssh.json` — dirs `0700`, files `0600`. Never let dev and production builds share a data dir.
+- **Vendored terminal plugin:** `internal/terminal` mirrors `github.com/egoist/mygo/plugins/terminal` at the pinned version. On MyGo updates, re-sync production files and `internal/download`, and re-apply local deltas per `internal/terminal/UPSTREAM.md` (English labels, import paths, keybindings). Copy-on-select uses upstream's enum and `OnCopy`; ShellGrip filters program copies and handles `OnZoom` to keep all panes' saved font size in step.
+- **Git execution:** backend-side via `gitOutput` (4 s timeout, 12 s for WSL; WSL panes run `wsl.exe -d <distro> git …`), never by typing into the pane shell. Ref inputs validated against `gitRefNamePattern`/`gitRevisionPattern`. Credentials handled by re-execing the binary as askpass with `SHELLGRIP_ASKPASS_SECRET` (0600 secret file).
 
 ## Important Files
 
-- `main.go` — entry point, app/window/askpass dispatch, `GOREX_DIR`/`GOREX_DEBUG` wiring.
-- `go.mod` / `mygo.json` — module `gorex`, `go 1.27.3`, MyGo 0.10.0 pinned via `tool` directive; app identity/version/out-dir manifest. `main.go` embeds `mygo.json`; `appVersion()` prefers the packaged `mygo.App.Version()` and falls back to the manifest (source/dev runs). No ldflags stamping.
+- `main.go` — entry point, app/window/askpass dispatch, `SHELLGRIP_DIR`/`SHELLGRIP_DEBUG` wiring.
+- `go.mod` / `mygo.json` — module `shellgrip`, `go 1.27.3`, MyGo 0.10.0 pinned via `tool` directive; app identity/version/out-dir manifest. `main.go` embeds `mygo.json`; `appVersion()` prefers the packaged `mygo.App.Version()` and falls back to the manifest (source/dev runs). No ldflags stamping.
 - `state.go`, `view.go`, `commands.go`, `shortcuts.go` — App state, immediate-mode view, command/palette/keybinding system.
 - `quit.go` — closing quits: `beforeQuit`/`beforeClose`, the work that stops a quit, and the dialog that asks about it.
 - `git.go`, `scm.go`, `gitmenu.go`, `git_auth.go` — git plumbing and SCM UI.
@@ -89,7 +89,7 @@ Single test: `go test -run TestLoadGitRepo .`; subpackages: `go test ./internal/
 ## Testing & QA
 
 - Stdlib `testing` only; colocated `*_test.go`; table-driven anonymous-slice loops; helpers `t.Helper()`-style (`newTestApp`, `waitFor`, `runGit`, `requireGit`, `requireWSL`, `previewFixture`). No testdata/golden/snapshot files; fixtures built in `t.TempDir()`.
-- UI tests run the real view windowless via `ui.NewTester(a.view, W, H)` (`Click`, `Type`, `Key`, `Find`, `Texts`, `Frame`). The tester's clock only moves with `Advance`; real sleeps alone do not trigger tooltips or UI timers. `app_test.go:newTestApp` is the canonical setup: `t.Setenv("GOREX_DIR", ...)`, `t.Setenv("SHELL", testShell.path)`, `registerFonts()`, an `App` with one tab, `closeTestSessions` cleanup. `newTestAppInDir` starts shells in a fixture directory rather than racing the watcher with manual directory overrides. Use `nopConn` terminals for view-only tests; `refresh(a)` applies each pane's `sess.Info()` as the window's watcher does.
+- UI tests run the real view windowless via `ui.NewTester(a.view, W, H)` (`Click`, `Type`, `Key`, `Find`, `Texts`, `Frame`). The tester's clock only moves with `Advance`; real sleeps alone do not trigger tooltips or UI timers. `app_test.go:newTestApp` is the canonical setup: `t.Setenv("SHELLGRIP_DIR", ...)`, `t.Setenv("SHELL", testShell.path)`, `registerFonts()`, an `App` with one tab, `closeTestSessions` cleanup. `newTestAppInDir` starts shells in a fixture directory rather than racing the watcher with manual directory overrides. Use `nopConn` terminals for view-only tests; `refresh(a)` applies each pane's `sess.Info()` as the window's watcher does.
 - Git tests exec **real git** (`runGit`, `init -b main` + commits); `requireGit`/`requireWSL` `t.Skip` when absent. Platform tests gated by `//go:build windows` (`git_windows_test.go`) or runtime skip (`if !windowsProfiles { t.Skip(...) }`).
-- Test-affecting env vars: `GOREX_DIR`, `SHELL`, `GOREX_DEBUG` (script dir: lines like `shot`, `type <text>`, `size w h`, `tab N`, `focus N`, or a command title — drives the UI from a file), `GOREX_TEST_CTRLC` (pty re-exec role idiom), `GOREX_PREVIEW_TEST_FILE` (opt-in), `GOREX_ASKPASS_SECRET`.
+- Test-affecting env vars: `SHELLGRIP_DIR`, `SHELL`, `SHELLGRIP_DEBUG` (script dir: lines like `shot`, `type <text>`, `size w h`, `tab N`, `focus N`, or a command title — drives the UI from a file), `SHELLGRIP_TEST_CTRLC` (pty re-exec role idiom), `SHELLGRIP_PREVIEW_TEST_FILE` (opt-in), `SHELLGRIP_ASKPASS_SECRET`.
 - Gate for any change: `go test ./...` green (Windows-gated tests only run on Windows; no `-race`/coverage convention in-repo).

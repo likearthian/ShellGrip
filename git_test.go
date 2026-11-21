@@ -34,8 +34,8 @@ func TestLoadGitRepo(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.email", "gorex@example.invalid")
-	runGit(t, dir, "config", "user.name", "GoRex Test")
+	runGit(t, dir, "config", "user.email", "shellgrip@example.invalid")
+	runGit(t, dir, "config", "user.name", "ShellGrip Test")
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +96,8 @@ func TestGitChipLoadsRepository(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.email", "gorex@example.invalid")
-	runGit(t, dir, "config", "user.name", "GoRex Test")
+	runGit(t, dir, "config", "user.email", "shellgrip@example.invalid")
+	runGit(t, dir, "config", "user.name", "ShellGrip Test")
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

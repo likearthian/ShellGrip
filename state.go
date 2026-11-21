@@ -15,10 +15,10 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
-	"gorex/internal/terminal"
+	"shellgrip/internal/terminal"
 
-	"gorex/internal/appdir"
-	"gorex/internal/session"
+	"shellgrip/internal/appdir"
+	"shellgrip/internal/session"
 )
 
 // Tab is a tab of the window: panes in a tree of splits.
@@ -70,8 +70,10 @@ type Pane struct {
 	attention   bool
 	attentionAt time.Time
 	// bounds is where the pane's card was in the last frame.
-	bounds ui.Rect
-	closed bool
+	bounds    ui.Rect
+	closed    bool
+	stopWatch chan struct{}
+	stopOnce  sync.Once
 	// restored tells that the session was made anew for a pane of a
 	// saved layout whose session was gone.
 	restored bool
@@ -79,7 +81,7 @@ type Pane struct {
 	profile  terminalProfile
 }
 
-// App is the state of GoRex's window.
+// App is the state of ShellGrip's window.
 type App struct {
 	sshRelays         map[string]*sshRelayInstall
 	sshWatch          *sshRemoteWatch
@@ -89,6 +91,7 @@ type App struct {
 	vsCodeWSLMessage  string
 	vsCodeWSLHelpOpen bool
 	fileTree          *fileTreeState
+	fileTreeDragging  bool
 	win               *mygo.Window
 	host              session.Host
 	err               string
@@ -183,6 +186,7 @@ type App struct {
 	// The Source Control pane's draft message, folded groups and history.
 	scmDir           string
 	scmMessage       string
+	scmMessages      map[string]string
 	scmExpanded      map[string]bool
 	scmGraphHistory  *gitHistory
 	scmGraphRows     []scmGraphRow
@@ -272,7 +276,7 @@ func (a *App) newPaneWithProfile(dir string, cols, rows int, profile terminalPro
 		cols, rows = 80, 24
 	}
 	command, launchDir := profile.launch(dir)
-	sess, err := session.New(session.Options{Command: command, Dir: launchDir, Env: profile.environment(), Cols: cols, Rows: rows})
+	sess, err := session.New(session.Options{Command: command, Dir: launchDir, Env: profile.environment(), Cols: cols, Rows: rows, CustomPrompt: prefs.CustomPrompt})
 	p := &Pane{ID: a.id(), startDir: dir, profile: profile}
 	if err != nil {
 		log.Printf("starting a session: %v", err)
@@ -320,7 +324,7 @@ func (a *App) attach(p *Pane, cols, rows int) {
 		},
 		OnNotify: func(title, body string) {
 			if title == "" {
-				title = "GoRex"
+				title = "ShellGrip"
 			}
 			mygo.NewNotification(mygo.NotificationOptions{Title: title, Body: body}).Show()
 			// A program that asks for a notification asks for the user
@@ -344,7 +348,17 @@ func (a *App) attach(p *Pane, cols, rows int) {
 	// Until a view shows it, the terminal has the session's size.
 	term.Resize(cols, rows)
 	p.term = term
-	go a.watch(p)
+	p.stopWatch = make(chan struct{})
+	go a.watch(p, p.stopWatch)
+}
+
+func (p *Pane) markClosed() {
+	p.closed = true
+	p.stopOnce.Do(func() {
+		if p.stopWatch != nil {
+			close(p.stopWatch)
+		}
+	})
 }
 
 // onUI changes the state on the main thread, in the window that made the
@@ -374,19 +388,25 @@ func (c paneConn) Read(b []byte) (int, error) {
 
 // watch asks the session what runs in it, every half second, until the
 // pane closes.
-func (a *App) watch(p *Pane) {
+func (a *App) watch(p *Pane, stop <-chan struct{}) {
+	sess := p.sess
+	if sess == nil {
+		return
+	}
 	tick := time.NewTicker(500 * time.Millisecond)
 	defer tick.Stop()
-	for range tick.C {
-		if p.closed || p.sess == nil {
+	for {
+		select {
+		case <-stop:
 			return
+		case <-tick.C:
+			in := sess.Info()
+			a.onUI(func() {
+				if !p.closed {
+					a.apply(p, in)
+				}
+			})
 		}
-		in := p.sess.Info()
-		a.onUI(func() {
-			if !p.closed {
-				a.apply(p, in)
-			}
-		})
 	}
 }
 
@@ -513,7 +533,7 @@ func (a *App) closePane(p *Pane) {
 	if p.closed {
 		return
 	}
-	p.closed = true
+	p.markClosed()
 	a.closeSFTPPane(p)
 	if a.gitMenu.pane == p {
 		a.gitMenu = gitMenuState{}
@@ -597,7 +617,7 @@ func (a *App) removeTab(t *Tab) {
 // closeTab closes a tab and ends the sessions of its panes.
 func (a *App) closeTab(t *Tab) {
 	for _, p := range t.panes() {
-		p.closed = true
+		p.markClosed()
 		a.closeSFTPPane(p)
 		if a.gitMenu.pane == p {
 			a.gitMenu = gitMenuState{}

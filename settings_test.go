@@ -172,7 +172,7 @@ func TestSettingsTab(t *testing.T) {
 }
 
 func TestSettingsTabNavigationAndLayout(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	a := numberedTabs(2)
 	a.fontFamilies = []string{defaultFontFamily}
 	a.openSettings()
@@ -223,7 +223,7 @@ func TestSettingsTabNavigationAndLayout(t *testing.T) {
 }
 
 func TestChromeVibrancySetting(t *testing.T) {
-	t.Setenv("GOREX_DIR", t.TempDir())
+	t.Setenv("SHELLGRIP_DIR", t.TempDir())
 	prev := prefs
 	t.Cleanup(func() { prefs = prev })
 	prefs = settings{CopyOnSelect: true, PaneFocusCues: true}

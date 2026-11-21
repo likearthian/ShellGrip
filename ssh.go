@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gorex/internal/appdir"
+	"shellgrip/internal/appdir"
 )
 
 // sshConnection is an SSH target the user saved. Aliases name a Host of
