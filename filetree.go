@@ -25,17 +25,19 @@ const (
 )
 
 type fileTreeState struct {
-	pane     *Pane
-	hint     string
-	root     string
-	rows     []fileTreeRow
-	expanded map[string]bool
-	loading  bool
-	loaded   bool
-	next     time.Time
-	revision int
-	selected string
-	list     ui.ListState
+	readAt       time.Time
+	readRevision int
+	pane         *Pane
+	hint         string
+	root         string
+	rows         []fileTreeRow
+	expanded     map[string]bool
+	loading      bool
+	loaded       bool
+	next         time.Time
+	revision     int
+	selected     string
+	list         ui.ListState
 }
 
 func (a *App) toggleFileTree() {
@@ -135,6 +137,9 @@ func (a *App) refreshFileTree(c *ui.Context, p *Pane) *fileTreeState {
 	lookup := &Pane{SID: p.SID, profile: p.profile}
 	lookupWSL := p.profile.WSL && p.reportedDirectory() == ""
 	services := c.Services()
+	now := c.Now()
+	previousRoot := s.root
+	reuse := s.loaded && s.readRevision == revision && time.Now().Before(s.readAt) && a.watchPollInterval("dir:"+a.fileWatchDirectory(p)) == watchedSafetyRefresh
 	go func() {
 		dir := hint
 		if lookupWSL {
@@ -144,7 +149,8 @@ func (a *App) refreshFileTree(c *ui.Context, p *Pane) *fileTreeState {
 		}
 		root := fileTreeDirectory(lookup, dir)
 		var rows []fileTreeRow
-		if root != "" {
+		read := !reuse || root != previousRoot
+		if root != "" && read {
 			rows = readFileTree(root, expanded)
 		}
 		a.post(func() {
@@ -159,8 +165,12 @@ func (a *App) refreshFileTree(c *ui.Context, p *Pane) *fileTreeState {
 				s.expanded = map[string]bool{}
 				s.selected = ""
 			}
-			s.root, s.rows, s.loaded = root, rows, true
-			s.next = time.Now().Add(fileTreeRefresh)
+			if read {
+				s.root, s.rows, s.loaded = root, rows, true
+				s.readRevision = revision
+				s.readAt = time.Now().Add(watchedSafetyRefresh)
+			}
+			s.next = now.Add(a.treePollInterval(p))
 		})
 		services.Invalidate()
 	}()
@@ -176,7 +186,7 @@ func sidebarColors(c *ui.Context, k *colors) *colors {
 		sidebar.text = ui.Hex("#d3d6db")
 		sidebar.textMuted = ui.Hex("#a9adb5")
 		sidebar.panelSel = ui.Hex("#2d4672")
-		sidebar.hover = ui.Hex("#25272b")
+		sidebar.hover = ui.Hex("#292b2f")
 	} else {
 		sidebar.panel = ui.Hex("#f7f8fa")
 		sidebar.panelSel = ui.Hex("#d4e2ff")
@@ -237,7 +247,7 @@ func (a *App) fileTreeDivider(c *ui.Context, k *colors, width, available float32
 func (a *App) fileTreePanel(c *ui.Context, k *colors, p *Pane, width float32) {
 	k = sidebarColors(c, k)
 	s := a.refreshFileTree(c, p)
-	c.After(fileTreeRefresh)
+	c.After(a.treePollInterval(p))
 	selectedPath := s.selected
 	if selectedPath == "" {
 		selectedPath = s.root
@@ -246,10 +256,7 @@ func (a *App) fileTreePanel(c *ui.Context, k *colors, p *Pane, width float32) {
 		}
 	}
 	message := ""
-	switch {
-	case !s.loaded:
-		message = "Loading…"
-	case s.root == "":
+	if s.loaded && s.root == "" {
 		message = "Directory unavailable"
 	}
 	ui.Column(c.Key("file-tree")).Width(width).Shrink(0).MinHeight(0).
@@ -325,6 +332,11 @@ func (a *App) fileTreeRootRow(c *ui.Context, k *colors, s *fileTreeState, select
 			name = root
 		}
 		ui.Text(c, name).FontSize(13).FontWeight(600).TextColor(k.text).SingleLine().Ellipsis("…").MinWidth(0)
+		// A tree being read for the first time says so beside its root,
+		// rather than with a row of its own that comes and goes.
+		if !s.loaded {
+			ui.Spinner(c).Size(13, 13).Label("Loading")
+		}
 	})
 	if s.root != "" {
 		a.fileTreeContextMenu(c, rootRow, s.root, fileTreeRow{path: s.root, directory: true})

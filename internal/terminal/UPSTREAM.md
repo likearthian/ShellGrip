@@ -1,20 +1,30 @@
 # MyGo terminal plugin
 
 Source: `github.com/egoist/mygo/plugins/terminal`
-Version: `v0.3.5-0.20261008155018-bad73d119dc8`
+Version: `v0.10.0`
 License: MIT, reproduced in LICENSE.
 
-This local copy adds `Options.CopyOnSelect`, `Terminal.SetCopyOnSelect`, and
-the UI-thread `Options.OnCopySelection` callback for selection-copy feedback.
-On completion of a mouse selection, it copies nonempty selected text through
-the view's clipboard service. Mouse events sent to terminal programs do not
-copy text. The option is disabled by default in the plugin; GoRex enables it
-through its saved settings.
+Copy-on-select and copy notifications now use upstream's `CopyOnSelect`,
+`SetCopyOnSelect` and `OnCopy` APIs. GoRex maps its saved boolean setting to
+`CopyOnSelectClipboard` or `CopyOnSelectNone`, and shows copy feedback for
+`CopyUser` and `CopySelect`, leaving program clipboard writes quiet.
 
-Ctrl+V also pastes (in addition to the upstream platform shortcuts), and
-the Paste context-menu shortcut is Ctrl+V on Windows and Linux.
+Local keybinding changes in `keybind.go` keep Ctrl+C for programs even with
+a selection, make Ctrl+V paste on every platform, show Ctrl+V in the Paste
+context menu on Windows and Linux, and move non-macOS reset zoom to
+Ctrl+Shift+0 so Ctrl+0 remains available for tab 10. GoRex handles `OnZoom`
+to update the saved font size of every pane.
 
-Other changes are import paths and omission of the upstream generation tool.
-The native-library manifest and generated Ghostty themes are unchanged.
-When updating MyGo, synchronize this directory with its terminal plugin and
-reapply the options, setter, and selection-copy hooks.
+Other changes are import paths, English labels in `view.go` in place of
+upstream's inaccessible `internal/l10n`, and omission of the upstream
+generation tool and its directive. `internal/download` is copied from
+MyGo's same-version internal package because Go's internal import rules
+prevent using it directly. Its downloads retain upstream's SHA-256 checks,
+retries and cross-process locking. The native-library manifest and
+generated Ghostty themes are unchanged.
+
+When updating MyGo, synchronize the plugin's production Go files and
+manifest, omit `internal/libbuild`, and synchronize `internal/download`.
+Reapply the import paths, English labels, generation-directive omission
+and keybindings above. Keep LICENSE and GoRex's local regression tests;
+upstream tests and fixtures are not vendored.

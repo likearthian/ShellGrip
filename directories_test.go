@@ -25,13 +25,7 @@ func TestSplitUsesCurrentDirectory(t *testing.T) {
 		}
 		source.term.Send([]byte(command))
 		waitFor(t, tt, "directory change", func() bool {
-			sessions, _ := a.client.List()
-			for _, info := range sessions {
-				if info.ID == source.SID && samePath(info.Dir, dir) {
-					return true
-				}
-			}
-			return false
+			return source.sess != nil && samePath(source.sess.Info().Dir, dir)
 		})
 		// Deliberately stale poll data: splitting must refresh it itself.
 		source.info.Dir = os.TempDir()
@@ -51,8 +45,7 @@ func TestShellReportedDirectory(t *testing.T) {
 	defer term.Close()
 	term.Feed([]byte("\x1b]7;file://localhost/home/user/project%20files\x07"))
 	pane := &Pane{term: term, profile: terminalProfile{WSL: true}, startDir: "~"}
-	app := &App{}
-	if got := app.splitDirectory(pane); got != "/home/user/project files" {
+	if got := pane.splitDirectory(); got != "/home/user/project files" {
 		t.Fatalf("shell-reported directory = %q", got)
 	}
 }
@@ -75,7 +68,7 @@ func TestWSLReportedDistributionPath(t *testing.T) {
 			term.Feed([]byte("\x1b]7;" + test.reported + "\x07"))
 			profile := terminalProfile{ID: "wsl:Ubuntu", WSL: true, Command: []string{"wsl.exe", "--distribution", "Ubuntu"}}
 			pane := &Pane{term: term, profile: profile, startDir: "~"}
-			if got := (&App{}).splitDirectory(pane); got != test.want {
+			if got := pane.splitDirectory(); got != test.want {
 				t.Fatalf("split directory = %q, want %q", got, test.want)
 			}
 			if got := pane.directory(); got != test.want {
@@ -118,7 +111,7 @@ func TestWindowsReportedDirectory(t *testing.T) {
 			term.Feed([]byte("\x1b]7;" + reported + "\x07"))
 			profile := terminalProfile{Command: []string{"powershell.exe"}}
 			pane := &Pane{term: term, profile: profile}
-			dir := (&App{}).splitDirectory(pane)
+			dir := pane.splitDirectory()
 			if dir != `C:\Users\ziska\Project Files` {
 				t.Fatalf("PowerShell directory = %q", dir)
 			}
@@ -133,7 +126,7 @@ func TestWindowsReportedDirectory(t *testing.T) {
 	}
 }
 
-func TestMalformedDirectoryFallsBackToServer(t *testing.T) {
+func TestMalformedDirectoryFallsBackToSession(t *testing.T) {
 	if !windowsProfiles {
 		t.Skip("Windows path validation")
 	}
@@ -142,8 +135,8 @@ func TestMalformedDirectoryFallsBackToServer(t *testing.T) {
 	pane := a.newTab(dir).Focus
 	waitFor(t, tt, "shell startup", func() bool { return strings.Contains(pane.term.Text(), testShell.prompt) })
 	pane.term.Feed([]byte("\x1b]7;invalid-relative-path\x07"))
-	if got := a.splitDirectory(pane); !samePath(got, dir) {
-		t.Fatalf("malformed report overrode server path: %q, want %q", got, dir)
+	if got := pane.splitDirectory(); !samePath(got, dir) {
+		t.Fatalf("malformed report overrode the session's path: %q, want %q", got, dir)
 	}
 }
 

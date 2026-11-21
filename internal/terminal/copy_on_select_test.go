@@ -28,7 +28,11 @@ func (c *selectionTestConn) Close() error { c.once.Do(func() { close(c.closed) }
 
 func selectionTerminal(t *testing.T, enabled bool) (*Terminal, *ui.Tester) {
 	t.Helper()
-	term, err := New(Options{Conn: &selectionTestConn{closed: make(chan struct{})}, CopyOnSelect: enabled})
+	copyOnSelect := CopyOnSelectNone
+	if enabled {
+		copyOnSelect = CopyOnSelectClipboard
+	}
+	term, err := New(Options{Conn: &selectionTestConn{closed: make(chan struct{})}, CopyOnSelect: copyOnSelect})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +111,7 @@ func TestCopyOnSelectToggle(t *testing.T) {
 	if tt.Clipboard() != "hello" {
 		t.Fatal("manual copy stopped working")
 	}
-	term.SetCopyOnSelect(true)
+	term.SetCopyOnSelect(CopyOnSelectClipboard)
 	tt.SetClipboard("keep me")
 	dragHello(term, tt)
 	if tt.Clipboard() != "hello" {
@@ -118,7 +122,7 @@ func TestCopyOnSelectToggle(t *testing.T) {
 func TestCopySelectionNotification(t *testing.T) {
 	term, tt := selectionTerminal(t, true)
 	var notifications []string
-	term.opts.OnCopySelection = func(text string) {
+	term.opts.OnCopy = func(text string, source CopySource) {
 		if tt.Clipboard() != text {
 			t.Fatal("notification ran before the clipboard was updated")
 		}
@@ -198,5 +202,58 @@ func TestMouseTrackingDoesNotCopy(t *testing.T) {
 	}
 	if tt.Clipboard() != "hello" {
 		t.Fatalf("Shift selection copied %q while mouse tracking was enabled", tt.Clipboard())
+	}
+}
+
+func TestCtrlCReachesProgramWithSelection(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("Control+C is only overridden by upstream on Windows")
+	}
+	term, tt := selectionTerminal(t, false)
+	dragHello(term, tt)
+	tt.SetClipboard("keep me")
+	tt.Key(ui.Ctrl, ui.KeyC)
+	conn := term.opts.Conn.(*selectionTestConn)
+	deadline := time.Now().Add(time.Second)
+	for {
+		conn.mu.Lock()
+		got := string(conn.written)
+		conn.mu.Unlock()
+		if got == "\x03" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Ctrl+C with a selection wrote %q, want interrupt", got)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if tt.Clipboard() != "keep me" {
+		t.Fatal("Ctrl+C copied instead of interrupting the program")
+	}
+}
+
+func TestGoRexTerminalKeybinds(t *testing.T) {
+	for _, platform := range []string{"darwin", "windows", "linux"} {
+		t.Run(platform, func(t *testing.T) {
+			term := &Terminal{binds: defaultKeybinds(platform)}
+			for _, b := range term.binds {
+				if b.Mods&(ui.Ctrl|ui.Alt) == ui.Ctrl|ui.Alt {
+					t.Fatalf("binding consumes AltGr: %+v", b)
+				}
+				if platform != "darwin" && b.Mods == ui.Ctrl && (b.Key == ui.KeyC || b.Key == ui.Key0) {
+					t.Fatalf("binding consumes interrupt or tab 10: %+v", b)
+				}
+			}
+			b, ok := term.binding(ui.Ctrl, ui.KeyV)
+			if !ok || b.Action != ActionPaste || b.Performable {
+				t.Fatalf("Ctrl+V must always paste: %+v, found %v", b, ok)
+			}
+			if platform != "darwin" {
+				b, ok := term.shortcut(ActionPaste)
+				if !ok || b.Mods != ui.Ctrl || b.Key != ui.KeyV {
+					t.Fatalf("paste menu shortcut = %+v, found %v", b, ok)
+				}
+			}
+		})
 	}
 }

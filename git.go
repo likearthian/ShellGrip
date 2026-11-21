@@ -594,6 +594,10 @@ func (a *App) openGitAuth(p *Pane, dir string, commands [][]string, username, me
 	if p == nil || p.closed {
 		return
 	}
+	if saved := loadGitCredentials(dir); saved != nil {
+		a.runGitCommands(p, dir, saved, commands...)
+		return
+	}
 	a.gitAuth = gitAuthState{
 		open: true, pane: p, dir: dir, commands: commands,
 		title:    "Authentication required",
@@ -609,6 +613,7 @@ func (a *App) openGitAuthRetry(p *Pane, dir string, commands [][]string, usernam
 	if p == nil || p.closed {
 		return
 	}
+	deleteGitCredentials(dir)
 	a.gitAuth = gitAuthState{
 		open: true, pane: p, dir: dir, commands: commands,
 		title:    "Authentication required",
@@ -634,8 +639,12 @@ func (a *App) submitGitAuth() {
 	}
 	pane, dir, commands := auth.pane, auth.dir, auth.commands
 	creds := &gitCredentials{Username: strings.TrimSpace(auth.username), Password: password}
+	if auth.remember {
+		saveGitCredentials(dir, *creds)
+	}
 	auth.open = false
 	auth.password = ""
+	auth.remember = false
 	a.focusReq = pane
 	a.runGitCommands(pane, dir, creds, commands...)
 }

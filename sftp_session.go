@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -13,18 +14,21 @@ import (
 // sftpSession is a pane's SFTP connection, which the sidebar's remote
 // tree reads through.
 type sftpSession struct {
-	app  *App
-	pane *Pane
+	watchCtx    context.Context
+	watchCancel context.CancelFunc
+	app         *App
+	pane        *Pane
 
 	fs      remoteFS
 	closeFS func()
 	home    string
 
-	connecting   bool
-	err          string
-	needPassword bool
-	password     string
-	closed       bool
+	connecting       bool
+	err              string
+	needPassword     bool
+	password         string
+	rememberPassword bool
+	closed           bool
 }
 
 // sftpFor returns the pane's session, making one when it has none yet.
@@ -78,15 +82,27 @@ func (s *sftpSession) connect() {
 	if conn == nil {
 		return
 	}
+	if s.watchCtx == nil || s.watchCtx.Err() != nil {
+		s.watchCtx, s.watchCancel = context.WithCancel(context.Background())
+	}
 	s.connecting = true
 	s.err = ""
 	s.needPassword = false
 	password := s.password
+	remember := s.rememberPassword
 	go func() {
+		if password == "" {
+			password = loadSSHPassword(*conn)
+		}
 		fs, closeFS, err := dialSFTP(*conn, password)
 		home := ""
 		if err == nil {
 			home, _ = fs.Getwd()
+			if remember && password != "" {
+				saveSSHPassword(*conn, password)
+			}
+		} else if errors.Is(err, errSSHAuth) {
+			deleteSSHPassword(*conn)
 		}
 		mygo.RunOnMain(func() {
 			if s.closed {
@@ -116,6 +132,12 @@ func (s *sftpSession) connect() {
 
 func (s *sftpSession) close() {
 	s.closed = true
+	if s.watchCancel != nil {
+		s.watchCancel()
+	}
+	if s.app != nil {
+		s.app.closeSSHWatchFor(s)
+	}
 	if s.closeFS != nil {
 		s.closeFS()
 		s.closeFS = nil
@@ -126,6 +148,12 @@ func (s *sftpSession) close() {
 // drop marks the connection lost, keeping the reason for the sidebar. The
 // ssh process is closed off the frame, as its Wait may take a moment.
 func (s *sftpSession) drop(message string) {
+	if s.watchCancel != nil {
+		s.watchCancel()
+	}
+	if s.app != nil {
+		s.app.closeSSHWatchFor(s)
+	}
 	if s.closeFS != nil {
 		close := s.closeFS
 		s.closeFS = nil

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 func TestParseGitStatusFiles(t *testing.T) {
@@ -174,8 +175,8 @@ func TestLoadDiff(t *testing.T) {
 				t.Fatalf("%s lacks %q: %s", name, part, text.String())
 			}
 		}
-		if len(content.diffRows) == 0 {
-			t.Fatalf("%s has no side-by-side rows", name)
+		if content.diffPatch == nil {
+			t.Fatalf("%s has no viewer patch", name)
 		}
 	}
 	check("unstaged", loadDiff(&Pane{}, repo, gitFile{Path: "notes.txt", X: '.', Y: 'M'}, false), "-two", "+changed")
@@ -189,64 +190,66 @@ func TestLoadDiff(t *testing.T) {
 	}
 	check("untracked", loadDiff(&Pane{}, repo, gitFile{Path: "new.txt", X: '.', Y: '?'}, false), "new file", "+new")
 	untracked := loadDiff(&Pane{}, repo, gitFile{Path: "new.txt", X: '.', Y: '?'}, false)
-	if len(untracked.diffRows) == 0 || untracked.diffRows[0].left.present || untracked.diffRows[0].right.text != "new" {
-		t.Fatalf("untracked rows: %+v", untracked.diffRows)
+	if untracked.diffPatch == nil || untracked.diffPatch.OldName != "" {
+		t.Fatalf("untracked patch: %+v", untracked.diffPatch)
 	}
-}
+	var d editor.DiffState
+	d.SetPatch(*untracked.diffPatch)
+	if d.Old.String() != "" || d.New.String() != "new" {
+		t.Fatalf("untracked buffers: %q / %q", d.Old.String(), d.New.String())
+	}
+	if err := os.Remove(notes); err != nil {
+		t.Fatal(err)
+	}
+	deleted := loadDiff(&Pane{}, repo, gitFile{Path: "notes.txt", X: '.', Y: 'D'}, false)
+	if deleted.diffPatch == nil || deleted.diffPatch.NewName != "" {
+		t.Fatalf("deleted patch: %+v", deleted)
+	}
+	d.SetPatch(*deleted.diffPatch)
+	if d.Old.String() != "one\nchanged" || d.New.String() != "" {
+		t.Fatalf("deleted buffers: %q / %q", d.Old.String(), d.New.String())
+	}
+	binaryPath := filepath.Join(dir, "image.bin")
+	if err := os.WriteFile(binaryPath, []byte{0, 1, 2}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binary := loadDiff(&Pane{}, repo, gitFile{Path: "image.bin", X: '.', Y: '?'}, false)
+	if binary.message != "" || binary.diffPatch != nil || !strings.Contains(string(binary.source), "Binary files") {
+		t.Fatalf("binary fallback: %+v", binary)
+	}
 
-func TestParseDiffRows(t *testing.T) {
-	diff := `diff --git a/x.txt b/x.txt
-index 1111111..2222222 100644
---- a/x.txt
-+++ b/x.txt
-@@ -1,3 +1,3 @@
- one
--two
-+changed
- three
-@@ -10,1 +10,2 @@
- ten
-+eleven
-`
-	rows := parseDiffRows(diff)
-	var separators int
-	for _, row := range rows {
-		if row.separator {
-			separators++
-		}
-	}
-	if separators != 1 {
-		t.Fatalf("%d separators in %+v, want 1", separators, rows)
-	}
-	checkRow(t, "replacement", previewContent{diffRows: rows}, "two", "changed", 2, 2)
-	for _, row := range rows {
-		if row.left.present && row.right.present && row.left.text == "one" {
-			if row.left.number != 1 || row.right.number != 1 {
-				t.Fatalf("context line numbers %d/%d", row.left.number, row.right.number)
-			}
-		}
-		if row.right.present && row.right.text == "eleven" {
-			if row.left.present || row.right.number != 11 || row.marker != "+" {
-				t.Fatalf("addition row %+v", row)
-			}
-		}
-	}
 }
 
 func checkRow(t *testing.T, name string, content previewContent, left, right string, leftNo, rightNo int) {
 	t.Helper()
-	for _, row := range content.diffRows {
-		if row.left.present && row.right.present && row.left.text == left && row.right.text == right {
-			if row.left.number != leftNo || row.right.number != rightNo {
-				t.Fatalf("%s: line numbers %d/%d, want %d/%d", name, row.left.number, row.right.number, leftNo, rightNo)
+	if content.diffPatch == nil {
+		t.Fatalf("%s: missing patch", name)
+	}
+	for _, h := range content.diffPatch.Hunks {
+		oldLine, newLine := h.OldStart, h.NewStart
+		foundLeft, foundRight := false, false
+		for _, line := range h.Lines {
+			if len(line) == 0 {
+				continue
 			}
-			if row.marker != "→" {
-				t.Fatalf("%s: marker %q, want →", name, row.marker)
+			if line[0] == '-' {
+				foundLeft = foundLeft || line[1:] == left && oldLine == leftNo
+				oldLine++
 			}
+			if line[0] == '+' {
+				foundRight = foundRight || line[1:] == right && newLine == rightNo
+				newLine++
+			}
+			if line[0] == ' ' {
+				oldLine++
+				newLine++
+			}
+		}
+		if foundLeft && foundRight {
 			return
 		}
 	}
-	t.Fatalf("%s: no row %q → %q in %+v", name, left, right, content.diffRows)
+	t.Fatalf("%s: missing change %q to %q at %d/%d", name, left, right, leftNo, rightNo)
 }
 
 func TestSourceControlDiffPreview(t *testing.T) {
@@ -269,9 +272,7 @@ func TestSourceControlDiffPreview(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a, tt := newTestApp(t)
-	p := a.tab().Focus
-	p.info.Dir, p.startDir = dir, dir
+	a, tt := newTestAppInDir(t, dir)
 	waitFor(t, tt, "the changed file", func() bool {
 		_, ok := tt.Find("Show diff for notes.txt")
 		return ok
@@ -296,17 +297,14 @@ func TestSourceControlDiffPreview(t *testing.T) {
 			t.Fatalf("the diff lacks %q: %s", part, text.String())
 		}
 	}
-	left, ok := tt.Find("two")
-	if !ok {
-		t.Fatalf("the side-by-side view lacks the original line; texts %q", tt.Texts())
+	if _, ok := tt.Find("Diff preview"); !ok {
+		t.Fatal("missing native diff viewer")
 	}
-	right, ok := tt.Find("changed")
-	if !ok {
-		t.Fatalf("the side-by-side view lacks the modified line; texts %q", tt.Texts())
+	d := tab.preview.diffDisplay
+	if d == nil || !strings.Contains(d.Old.String(), "two") || !strings.Contains(d.New.String(), "changed") {
+		t.Fatal("native diff viewer lacks original or modified text")
 	}
-	if left.X >= right.X {
-		t.Fatalf("the diff sides are not side by side: original %v, modified %v", left, right)
-	}
+
 }
 
 func TestSCMCommands(t *testing.T) {

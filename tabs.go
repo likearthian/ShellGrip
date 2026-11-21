@@ -12,6 +12,8 @@ import (
 
 const (
 	tabH         = 28
+	tabR         = 7 // the tabs' corners
+	tabGap       = 4 // the space between tabs
 	tabMaxW      = 214
 	tabMinW      = 120
 	tileW        = 21
@@ -39,28 +41,23 @@ func (a *App) tabHintState(now time.Time, held bool) {
 	a.tabHints = now.Sub(a.ctrlHeldAt) >= tabHintDelay
 }
 
-// tabStrip draws the tabs, in a track as wide as they are, which shrinks
-// with them when the title bar has no room for them all. The track is part
-// of the title bar: its edges and the gaps between tabs drag the window.
+// tabStrip draws the tabs side by side on the title bar, in a track as wide
+// as they are, which shrinks with them when the title bar has no room for
+// them all. Only the active tab is filled, so the bar behind shows through
+// the others; the track and the gaps between tabs drag the window.
 func (a *App) tabStrip(c *ui.Context, k *colors) {
 	widths := make([]float32, len(a.tabs))
-	total := float32(4 + max(len(a.tabs)-1, 0)) // the padding and separators
+	total := float32(4 + tabGap*max(len(a.tabs)-1, 0)) // the padding and gaps
 	for i, t := range a.tabs {
 		widths[i] = tabWidth(c, t)
 		total += widths[i]
 	}
-	track := ui.Row(c).Basis(total).Shrink(1).MinWidth(0).Height(tabH+4).Padding(2).Radius((tabH+4)/2).
-		Background(k.track).Border(0.5, k.trackBorder).AlignItems(ui.Center).ClipX().
+	track := ui.Row(c).Basis(total).Shrink(1).MinWidth(0).Height(tabH + 4).Padding(2).Gap(tabGap).
+		AlignItems(ui.Center).ClipX().
 		DragWindow().Role(ui.RoleTabList).Label("Tabs")
 	tabs := slices.Clone(a.tabs)
 	track.Children(func() {
 		for i, t := range tabs {
-			if i > 0 {
-				sep := ui.Box(c).Size(1, 16).Shrink(0)
-				if i != a.active && i-1 != a.active {
-					sep.Background(k.tabSep)
-				}
-			}
 			a.tabItem(c, k, i, t, widths[i])
 		}
 	})
@@ -128,14 +125,15 @@ func attentionDot(c *ui.Context, k *colors, since time.Time, size float32) ui.El
 func (a *App) tabItem(c *ui.Context, k *colors, i int, t *Tab, width float32) {
 	active := i == a.active
 	e := ui.Row(c.Key(t.ID)).Height(tabH).Basis(width).Shrink(1).MinWidth(64).
-		Padding(0, 10, 0, 6).Gap(9).AlignItems(ui.Center).Radius(tabH / 2).Role(ui.RoleTab).Selected(active)
+		Padding(0, 10, 0, 6).Gap(9).AlignItems(ui.Center).Radius(tabR).Role(ui.RoleTab).Selected(active)
 	name, detail := t.label()
-	e.Label(name + " " + detail)
+	full := strings.TrimSpace(name + " " + detail)
+	e.Label(full)
+	// The label fades out when the tab is too narrow for it: the tooltip
+	// names the whole thing.
+	e.Tooltip(full)
 	if active {
-		e.Background(k.tabActive).Shadow(0, 1, 2, 0, k.shadow).Shadow(0, 2, 8, 0, k.shadow)
-		if c.Theme().Dark {
-			e.Border(1, k.cardBorderFocused)
-		}
+		e.Background(k.panelSel.Mix(k.panel, 0.35)).Border(1.5, k.accent.Mix(k.background, 0.5))
 	} else if e.Hovered() {
 		e.Background(k.hover)
 	}

@@ -195,7 +195,7 @@ func TestSettingsTabNavigationAndLayout(t *testing.T) {
 		a.selectTab(active)
 		layout := a.snapshot()
 		if len(layout.Tabs) != 2 || layout.Active < 0 || layout.Active >= 2 {
-			t.Fatalf("settings leaked into saved session layout: %+v", layout)
+			t.Fatalf("settings leaked into the saved layout: %+v", layout)
 		}
 		if active == 2 && layout.Active != 1 {
 			t.Fatal("saved active terminal index shifted")
@@ -219,5 +219,35 @@ func TestSettingsTabNavigationAndLayout(t *testing.T) {
 	a.closeFocused()
 	if len(a.tabs) != 2 || a.tab().Settings || a.focusReq != a.tab().Focus {
 		t.Fatal("closing Settings did not return focus to a terminal")
+	}
+}
+
+func TestChromeVibrancySetting(t *testing.T) {
+	t.Setenv("GOREX_DIR", t.TempDir())
+	prev := prefs
+	t.Cleanup(func() { prefs = prev })
+	prefs = settings{CopyOnSelect: true, PaneFocusCues: true}
+
+	a := numberedTabs(1)
+	a.fontFamilies = []string{defaultFontFamily}
+	a.openSettings()
+	tt := ui.NewTester(a.view, 900, 600)
+	if err := tt.Click("Translucent window chrome"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !prefs.ChromeVibrancy {
+		t.Fatal("clicking Translucent window chrome did not enable ChromeVibrancy")
+	}
+	raw, err := os.ReadFile(settingsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved settings
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if !saved.ChromeVibrancy {
+		t.Fatal("ChromeVibrancy was not persisted to settings.json")
 	}
 }

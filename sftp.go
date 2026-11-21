@@ -28,6 +28,13 @@ type remoteFS interface {
 type sftpRemote struct{ *sftp.Client }
 
 func (f sftpRemote) Open(name string) (io.ReadCloser, error) { return f.Client.Open(name) }
+func (f sftpRemote) CreateRelay(name string) (io.WriteCloser, error) {
+	return f.Client.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+}
+func (f sftpRemote) CreateUpload(name string) (io.WriteCloser, error) {
+	return f.Client.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+}
+func (f sftpRemote) RenameRelay(old, new string) error { return f.Client.PosixRename(old, new) }
 
 // errSSHAuth tells that the host would not take the keys, and asks for a
 // password.

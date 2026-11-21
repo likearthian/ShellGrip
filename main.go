@@ -1,10 +1,8 @@
 // GoRex is a terminal of tabs and split panes, after Superlogical's Rex,
-// in MyGo's native UI. Its shells run in a session server of their own,
-// so that they outlive the app: quit it, open it again, and every tab and
-// pane is back as it was, its programs still running.
+// in MyGo's native UI. Its shells run in pseudo-terminals of the window:
+// closing the window ends them, as it ends the app.
 //
 //	go tool mygo dev    the app, rebuilt as the code changes
-//	go run . -server    the session server alone, in the foreground
 package main
 
 import (
@@ -12,13 +10,12 @@ import (
 	"encoding/json"
 	"log"
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"gorex/internal/rex"
+	"gorex/internal/session"
 )
 
 // manifestData is the app's own mygo.json, embedded so version and
@@ -55,26 +52,16 @@ func main() {
 		runAskpass(secret, os.Args[1:])
 		return
 	}
-	// -server runs the session server; other arguments are AppKit's, as
-	// -NSWindowResizeTime, which it reads itself.
-	if len(os.Args) > 1 && os.Args[1] == "-server" {
-		log.SetPrefix("[server] ")
-		if err := rex.Serve(); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
-	// One GoRex per user: closing the window hides it to the tray, so a
-	// taskbar launch while it runs would otherwise start a second GUI,
-	// with a second tray icon and a second window over the same
-	// sessions. Hand such a launch to the running instance (see
-	// OnSecondInstance) and let this process exit.
+	// One GoRex per user: a taskbar launch while it runs would otherwise
+	// start a second GUI over the same data directory. Hand such a launch
+	// to the running instance (see OnSecondInstance) and let this process
+	// exit.
 	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}
-	// The state of the sessions lives in the app's data directory, which
-	// the server it starts takes from GOREX_DIR: "GoRex", or "GoRex Dev"
-	// under mygo dev, which keeps the installed app's sessions apart.
+	// The state of the window lives in the app's data directory, which
+	// dev builds take from GOREX_DIR: "GoRex", or "GoRex Dev" under mygo
+	// dev, which keeps the installed app's state apart.
 	if os.Getenv("GOREX_DIR") == "" {
 		if dir, err := mygo.App.Path(mygo.PathUserData); err == nil {
 			os.Setenv("GOREX_DIR", dir)
@@ -89,59 +76,23 @@ func main() {
 	})
 	mygo.App.WhenReady(func() {
 		a.open()
-		if a.win != nil {
-			a.createTray()
-		}
 	})
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
 		if !hasVisibleWindows {
 			a.showWindow()
 		}
 	})
-	mygo.App.OnWindowAllClosed(func() {
-		if runtime.GOOS != "darwin" && a.tray == nil {
-			mygo.App.Quit()
-		}
-	})
 	mygo.App.OnBeforeQuit(a.beforeQuit)
 	mygo.App.OnQuit(func() {
 		a.closeSFTPSessions()
-		if a.tray != nil {
-			a.tray.Destroy()
-		}
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// open opens the window, with the tabs the server kept.
+// open opens the window, with the tabs of the saved layout.
 func (a *App) open() {
-	client, err := rex.Connect()
-	if err != nil {
-		log.Print(err)
-		mygo.Dialog.Error("GoRex could not start its session server", err.Error())
-		mygo.App.Quit()
-		return
-	}
-	a.client = client
-	a.hello, err = client.Hello()
-	if err == nil && mygo.IsDev() && staleServer(a.hello) {
-		// A server a build before this one started runs that build's
-		// code: start one of this build's, ending its sessions.
-		if client, err = client.Restart(a.hello.PID); err == nil {
-			a.client = client
-			a.hello, err = client.Hello()
-		} else {
-			log.Print(err)
-			mygo.Dialog.Error("GoRex could not restart its session server", err.Error())
-			mygo.App.Quit()
-			return
-		}
-	}
-	if err == nil && a.hello.Version != rex.ProtocolVersion {
-		a.err = "The session server is of another version of GoRex: quit and end all sessions to restart it."
-	}
 	a.reset()
 	a.profiles = discoverProfiles()
 	a.sshConns = loadSSHConnections()
@@ -154,7 +105,8 @@ func (a *App) open() {
 		StateKey:             "main",
 		TitleBarStyle:        mygo.TitleBarHidden,
 		TrafficLightPosition: &mygo.Point{X: 16, Y: 15},
-		BackgroundColor:      "light-dark(#efe1e6, #292426)",
+		BackgroundColor:      "light-dark(#e9eaec, #252628)",
+		Vibrancy:             chromeMaterial(),
 		Content:              ui.View(a.view),
 	}
 	if ownControls {
@@ -163,6 +115,13 @@ func (a *App) open() {
 	}
 	win := mygo.NewWindow(opts)
 	a.win = win
+	a.applyVibrancy()
+	// The host's details may take a second: the panel shows the name until
+	// they are there.
+	go func() {
+		h := session.HostInfo()
+		win.Update(func() { a.host = h })
+	}()
 	// The file trees read when the window is back, and keep quiet while it
 	// is in the background.
 	win.OnFocus(func() { a.refreshTrees() })
@@ -173,48 +132,57 @@ func (a *App) open() {
 		a.newTab(home)
 	}
 	a.changed()
-	go a.poll(win, client)
 	a.debugHook()
 	win.OnClose(a.beforeClose)
 	win.OnClosed(func() {
+		a.closeFileWatches()
 		a.saveNow()
 		a.closeSFTPSessions()
 		a.quitting = true
 		for _, t := range a.tabs {
 			for _, p := range t.panes() {
 				p.closed = true
+				if p.sess != nil {
+					p.sess.Kill() // quitting ends the programs, at once
+				}
 				if p.term != nil {
-					p.term.Close() // detaches: the session goes on
+					p.term.Close()
 				}
 			}
 		}
-		a.client.Close()
 		a.win = nil
 	})
 }
 
-// saveNow sends the layout to the server and waits for it to be kept.
+// showWindow brings the window to the front, as a second launch or a click
+// on the app asks.
+func (a *App) showWindow() {
+	if a.exiting.Load() {
+		return
+	}
+	if a.win == nil {
+		a.open()
+		return
+	}
+	if a.win.IsMinimized() {
+		a.win.Restore()
+	}
+	a.win.Show()
+}
+
+// saveNow writes the layout to disk, as the window closes or the app quits.
 func (a *App) saveNow() {
-	if a.client == nil || len(a.tabs) == 0 && !a.quitting {
+	if len(a.tabs) == 0 && !a.quitting {
 		return
 	}
 	b, err := json.Marshal(a.snapshot())
 	if err != nil {
 		return
 	}
-	done := make(chan struct{})
-	go func() {
-		a.client.SetLayout(b)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-	}
+	a.writeLayout(b)
 }
 
-// reset forgets the state of a window that closed, keeping the server's
-// connection, for the next window.
+// reset forgets the state of a window that closed, for the next window.
 func (a *App) reset() {
 	a.closeSFTPSessions()
 	a.sftpSessions = map[int]*sftpSession{}
@@ -234,13 +202,7 @@ func (a *App) reset() {
 	a.gitMenu, a.gitPrompt, a.gitAuth = gitMenuState{}, gitPromptState{}, gitAuthState{}
 	a.scmDir, a.scmMessage, a.scmExpanded = "", "", nil
 	a.saveDue, a.quitting, a.lastSnapshot, a.title = false, false, "", ""
+	a.confirming = false
 	a.exiting.Store(false)
 	a.cueOn = false
-}
-
-// staleServer reports whether the server runs another build of the app
-// than this one, as after mygo dev rebuilt it.
-func staleServer(h rex.Hello) bool {
-	exe, at := rex.Executable()
-	return h.Exe != exe || !h.ExeTime.Equal(at)
 }

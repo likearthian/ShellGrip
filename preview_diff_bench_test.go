@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -11,12 +12,15 @@ func benchmarkDiffPreview(rows int) (*ui.Tester, *filePreview) {
 	registerFonts()
 	a := &App{}
 	p := &filePreview{subtitle: "Changes"}
+	var patch strings.Builder
+	fmt.Fprintf(&patch, "diff --git a/config.go b/config.go\n--- a/config.go\n+++ b/config.go\n@@ -1,%d +1,%d @@\n", rows, rows)
 	for i := range rows {
-		left := diffCell{number: i + 1, text: fmt.Sprintf("    configuration.Value%d = original.Value%d", i, i), present: true, kind: '-', changeStart: 28, changeEnd: 36}
-		right := left
-		right.kind = '+'
-		p.content.diffRows = append(p.content.diffRows, diffRow{left: left, right: right})
+		fmt.Fprintf(&patch, "-    configuration.Value%d = original.Value%d\n", i, i)
 	}
+	for i := range rows {
+		fmt.Fprintf(&patch, "+    configuration.Value%d = modified.Value%d\n", i, i)
+	}
+	p.content = diffFixture(patch.String())
 	tt := ui.NewTester(func(c *ui.Context) {
 		ui.Column(c).Fill().Children(func() { a.sideBySideDiff(c, colorsOf(c), p, c.Theme().Dark) })
 	}, 1000, 620)
@@ -31,11 +35,11 @@ func BenchmarkDiffPreviewScroll(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				delta := float32(63)
+				delta := float64(63)
 				if i/100%2 == 1 {
 					delta = -delta
 				}
-				p.diffScroll[0].Y += delta
+				p.diffDisplay.SetScrollY(p.diffDisplay.ScrollY() + delta)
 				tt.Frame()
 			}
 		})

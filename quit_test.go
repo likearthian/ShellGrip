@@ -8,59 +8,118 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"gorex/internal/rex"
+	"github.com/egoist/mygo/ui"
 )
 
-func TestBeforeQuitKeepsSessionsAndSavesLayout(t *testing.T) {
+// TestQuitKeepsLayout checks that a quit with the shells at their prompts
+// goes ahead, saves the layout, and leaves the sessions for the window to
+// close.
+func TestQuitKeepsLayout(t *testing.T) {
 	a, _ := newTestApp(t)
 	want, err := json.Marshal(a.snapshot())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if summary := a.workSummary(); summary != "" {
+		t.Fatalf("a fresh shell asks %q", summary)
 	}
 	e := &mygo.QuitEvent{}
 	a.beforeQuit(e)
 	if e.DefaultPrevented() || !a.exiting.Load() {
 		t.Fatal("explicit quit should proceed without a dialog")
 	}
-	got, err := a.client.Layout()
+	got, err := os.ReadFile(a.layoutPath())
 	if err != nil || !bytes.Equal(got, want) {
 		t.Fatalf("saved layout = %s, %v; want %s", got, err, want)
 	}
-	infos, err := a.client.List()
-	if err != nil || len(infos) != 1 || infos[0].Exited {
-		t.Fatalf("sessions should keep running: %v, %v", infos, err)
+	if p := a.tab().Focus; p.sess == nil || p.term == nil {
+		t.Fatal("the session should run until the window closes")
 	}
 }
 
-func TestBeforeCloseAllowsExitAndTrayFallback(t *testing.T) {
-	for _, exiting := range []bool{false, true} {
-		a := &App{}
-		a.exiting.Store(exiting)
-		if exiting {
-			a.tray = &mygo.Tray{}
-			a.win = &mygo.Window{}
+// TestQuitAsksWithARunningProgram checks that a program in the foreground
+// stops the quit, and a Cancel keeps the app and its programs running.
+func TestQuitAsksWithARunningProgram(t *testing.T) {
+	a, tt := newTestApp(t)
+	p := a.tab().Focus
+	waitFor(t, tt, "the shell", func() bool {
+		return p.term != nil && p.sess != nil && p.sess.Info().Idle
+	})
+	tt.Type(testShell.run)
+	tt.Key(0, ui.KeyEnter)
+	waitFor(t, tt, "the program", func() bool { return !p.sess.Info().Idle })
+
+	asked := make(chan string, 1)
+	a.askQuit = func(summary string) bool { asked <- summary; return false }
+	e := &mygo.QuitEvent{}
+	a.beforeQuit(e)
+	if !e.DefaultPrevented() {
+		t.Fatal("the quit went ahead with a program running")
+	}
+	if a.exiting.Load() {
+		t.Fatal("a prevented quit leaves the app running")
+	}
+	select {
+	case summary := <-asked:
+		if summary == "" {
+			t.Fatal("the dialog says nothing of the program")
 		}
-		e := &mygo.CloseEvent{}
-		a.beforeClose(e)
-		if e.DefaultPrevented() {
-			t.Fatalf("close prevented with exiting=%t", exiting)
-		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no dialog")
+	}
+	tt.Frame() // the answer comes back to the window
+	if a.exiting.Load() || a.confirming {
+		t.Fatal("Cancel should leave the app running")
+	}
+	if p.sess == nil || p.term == nil {
+		t.Fatal("Cancel ended a session")
 	}
 }
 
-func TestTrayEndAllStopsServer(t *testing.T) {
-	a, _ := newTestApp(t)
-	items := a.trayMenu().Items()
-	items[len(items)-1].Click(nil, nil)
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		if _, err := os.Stat(rex.SocketPath()); os.IsNotExist(err) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("tray quit did not stop the session server")
-		}
+// TestQuitConfirmedEndsTheApp checks that the dialog's Quit ends it.
+func TestQuitConfirmedEndsTheApp(t *testing.T) {
+	a, tt := newTestApp(t)
+	p := a.tab().Focus
+	waitFor(t, tt, "the shell", func() bool {
+		return p.term != nil && p.sess != nil && p.sess.Info().Idle
+	})
+	tt.Type(testShell.run)
+	tt.Key(0, ui.KeyEnter)
+	waitFor(t, tt, "the program", func() bool { return !p.sess.Info().Idle })
+
+	a.askQuit = func(string) bool { return true }
+	e := &mygo.QuitEvent{}
+	a.beforeQuit(e)
+	if !e.DefaultPrevented() {
+		t.Fatal("the quit went ahead before the answer")
 	}
-	if !a.exiting.Load() || !a.quitting {
-		t.Fatal("tray quit should allow the app and window to exit")
+	waitFor(t, tt, "the confirmed quit", func() bool { return a.exiting.Load() })
+}
+
+// TestCloseEndsTheApp checks that closing the window is finishing work:
+// nothing to ask about, and the app quits rather than hiding.
+func TestCloseEndsTheApp(t *testing.T) {
+	a, tt := newTestApp(t)
+	waitFor(t, tt, "the shell", func() bool {
+		p := a.tab().Focus
+		return p.term != nil && p.sess != nil && p.sess.Info().Idle
+	})
+	e := &mygo.CloseEvent{}
+	a.beforeClose(e)
+	if !e.DefaultPrevented() {
+		t.Fatal("the close should go through the app's own quit")
+	}
+	waitFor(t, tt, "the quit", func() bool { return a.exiting.Load() })
+}
+
+// TestCloseDuringQuitClosesTheWindow checks that the quit sequence lets
+// the window close.
+func TestCloseDuringQuitClosesTheWindow(t *testing.T) {
+	a := &App{}
+	a.exiting.Store(true)
+	e := &mygo.CloseEvent{}
+	a.beforeClose(e)
+	if e.DefaultPrevented() {
+		t.Fatal("the quit sequence was blocked")
 	}
 }

@@ -11,9 +11,9 @@ import (
 )
 
 // hostChip shows the machine the sessions run on; a click shows more of
-// it, and of the session server.
+// it, and of this machine.
 func (a *App) hostChip(c *ui.Context, k *colors) {
-	h := a.hello.Host
+	h := a.host
 	name, model := h.Name, h.Model
 	if name == "" {
 		name, _ = os.Hostname()
@@ -51,7 +51,7 @@ func (a *App) hostChip(c *ui.Context, k *colors) {
 }
 
 func (a *App) hostPanel(c *ui.Context, k *colors, name, glyph string) {
-	h := a.hello.Host
+	h := a.host
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Box(c).Size(38, 38).Radius(10).Background(k.hover).Center().Children(func() {
 			ui.Icon(c, icon(glyph)).Size(24, 24).TextColor(k.text)
@@ -91,43 +91,34 @@ func (a *App) hostPanel(c *ui.Context, k *colors, name, glyph string) {
 		}
 	}
 	ui.Column(c).Gap(7).Children(func() {
-		row("Server", fmt.Sprintf("pid %d · up %s", a.hello.PID, roundDur(time.Since(a.hello.Started))))
 		row("Sessions", fmt.Sprintf("%d open, %d running a program", sessions, running))
 		row("Memory", a.ramLabel())
 		row("Version", appVersion())
 	})
-	ui.Text(c, "Sessions live in the server: quit GoRex and they keep running, and come back as they were when it opens again.").
+	ui.Text(c, "Sessions run in this window: closing GoRex ends them, after asking about the programs that still run.").
 		FontSize(11.5).TextColor(k.textFaint).LineHeight(1.35)
 	if ui.Button(c, "About").Tooltip("About GoRex").Clicked() {
 		a.hostOpen, a.aboutOpen = false, true
 	}
 }
 
-// ramLabel names the memory the app and its server hold, as the system
-// counts their working sets.
+// ramLabel names the memory the app works in, as the system counts its
+// working set.
 func (a *App) ramLabel() string {
-	app, server := a.ramUsage()
-	switch {
-	case app == 0 && server == 0:
-		return ""
-	case server == 0:
+	if app := a.ramUsage(); app > 0 {
 		return memorySize(app)
 	}
-	return "App " + memorySize(app) + " · Server " + memorySize(server)
+	return ""
 }
 
-// ramUsage reads how much memory the app and the server work in, at most
-// every couple of seconds: the popover asks only while it is open.
-func (a *App) ramUsage() (app, server uint64) {
+// ramUsage reads how much memory the app works in, at most every couple of
+// seconds: the popover asks only while it is open.
+func (a *App) ramUsage() uint64 {
 	if time.Since(a.ramAt) > 2*time.Second {
 		a.ramApp = processMemory(os.Getpid())
-		a.ramServer = 0
-		if a.hello.PID != 0 && a.hello.PID != os.Getpid() {
-			a.ramServer = processMemory(a.hello.PID)
-		}
 		a.ramAt = time.Now()
 	}
-	return a.ramApp, a.ramServer
+	return a.ramApp
 }
 
 // memorySize names bytes as megabytes, or gigabytes past a thousand.
@@ -136,18 +127,6 @@ func memorySize(b uint64) string {
 		return fmt.Sprintf("%.1f GB", float64(b)/float64(1<<30))
 	}
 	return fmt.Sprintf("%.0f MB", float64(b)/float64(1<<20))
-}
-
-func roundDur(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 48*time.Hour:
-		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
 // thisMachine names the machine the app runs on, as its system does.

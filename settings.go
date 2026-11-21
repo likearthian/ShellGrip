@@ -11,22 +11,27 @@ import (
 	"github.com/egoist/mygo/ui"
 	"gorex/internal/terminal"
 
-	"gorex/internal/rex"
+	"gorex/internal/appdir"
 )
 
-// settings are the user's choices, kept in settings.json beside the
-// server's state.
+// settings are the user's choices, kept in settings.json in the app's
+// data directory.
 type settings struct {
-	FileTree       bool              `json:"fileTree,omitempty"`
-	FileTreeWidth  float32           `json:"fileTreeWidth,omitempty"`
-	FileTreeView   string            `json:"fileTreeView,omitempty"`
-	SCMGraphRatio  float32           `json:"scmGraphRatio,omitempty"`
-	Shortcuts      map[string]string `json:"shortcuts,omitempty"`
-	DefaultProfile string            `json:"defaultProfile,omitempty"`
-	FontFamily     string            `json:"fontFamily,omitempty"`
-	TerminalTheme  string            `json:"terminalTheme,omitempty"`
-	CopyOnSelect   bool              `json:"copyOnSelect"`
-	PaneFocusCues  bool              `json:"paneFocusCues"`
+	MinimumContrast float32           `json:"minimumContrast,omitempty"`
+	ScrollSpeed     float32           `json:"scrollSpeed,omitempty"`
+	ScrollbackMiB   int               `json:"scrollbackMiB,omitempty"`
+	OptionAsAlt     bool              `json:"optionAsAlt,omitempty"`
+	FileTree        bool              `json:"fileTree,omitempty"`
+	FileTreeWidth   float32           `json:"fileTreeWidth,omitempty"`
+	FileTreeView    string            `json:"fileTreeView,omitempty"`
+	SCMGraphRatio   float32           `json:"scmGraphRatio,omitempty"`
+	Shortcuts       map[string]string `json:"shortcuts,omitempty"`
+	DefaultProfile  string            `json:"defaultProfile,omitempty"`
+	FontFamily      string            `json:"fontFamily,omitempty"`
+	TerminalTheme   string            `json:"terminalTheme,omitempty"`
+	CopyOnSelect    bool              `json:"copyOnSelect"`
+	PaneFocusCues   bool              `json:"paneFocusCues"`
+	ChromeVibrancy  bool              `json:"chromeVibrancy,omitempty"`
 	// Appearance is "light", "dark", or "" to follow the system.
 	Appearance string  `json:"appearance,omitempty"`
 	FontSize   float32 `json:"fontSize,omitempty"`
@@ -36,7 +41,7 @@ const defaultFontSize = 11.6
 
 var prefs = settings{CopyOnSelect: true, PaneFocusCues: true}
 
-func settingsPath() string { return filepath.Join(rex.Dir(), "settings.json") }
+func settingsPath() string { return filepath.Join(appdir.Dir(), "settings.json") }
 
 func loadSettings() {
 	prefs = settings{CopyOnSelect: true, PaneFocusCues: true}
@@ -46,6 +51,7 @@ func loadSettings() {
 	if prefs.FontSize < 6 || prefs.FontSize > 40 {
 		prefs.FontSize = defaultFontSize
 	}
+	normalizeTerminalSettings()
 	termFont.Size = prefs.FontSize
 	termFont.Family = terminalFontFamily(prefs.FontFamily)
 	var err error
@@ -58,7 +64,7 @@ func loadSettings() {
 
 func saveSettings() {
 	b, _ := json.MarshalIndent(prefs, "", "  ")
-	os.MkdirAll(rex.Dir(), 0o700)
+	os.MkdirAll(appdir.Dir(), 0o700)
 	os.WriteFile(settingsPath(), b, 0o600)
 }
 
@@ -76,6 +82,30 @@ func applyAppearance() {
 func (a *App) setAppearance(v string) {
 	prefs.Appearance = v
 	applyAppearance()
+	saveSettings()
+}
+
+func chromeMaterial() mygo.Vibrancy {
+	if windowsProfiles {
+		return mygo.VibrancyTabbed
+	}
+	return mygo.VibrancyMica
+}
+
+func (a *App) applyVibrancy() {
+	if a.win == nil {
+		return
+	}
+	if prefs.ChromeVibrancy {
+		a.win.SetVibrancy(chromeMaterial())
+	} else {
+		a.win.SetVibrancy(mygo.VibrancyNone)
+	}
+}
+
+func (a *App) setChromeVibrancy(enabled bool) {
+	prefs.ChromeVibrancy = enabled
+	a.applyVibrancy()
 	saveSettings()
 }
 
@@ -100,7 +130,7 @@ func (a *App) setCopyOnSelect(enabled bool) {
 	for _, tab := range a.tabs {
 		for _, pane := range tab.panes() {
 			if pane.term != nil {
-				pane.term.SetCopyOnSelect(enabled)
+				pane.term.SetCopyOnSelect(terminalCopyOnSelect(enabled))
 			}
 		}
 	}
@@ -200,6 +230,17 @@ func (a *App) settingsPanel(c *ui.Context, k *colors) {
 							}
 							ui.Text(c, "Mark the active pane with a stronger border and an Active label. Inactive terminals blend into their headers.").FontSize(11.5).TextColor(k.textFaint)
 						})
+						ui.Column(c).Gap(8).Children(func() {
+							ui.Text(c, "Window").FontSize(13).FontWeight(600).TextColor(k.text)
+							if ui.Checkbox(c, &prefs.ChromeVibrancy, "Translucent window chrome").Changed() {
+								a.setChromeVibrancy(prefs.ChromeVibrancy)
+							}
+							description := "Show the system vibrancy backdrop behind the title bar and window frame. Terminals stay opaque."
+							if windowsProfiles {
+								description = "On supported Windows 11 builds, Mica Alt tints the title bar and frame using your desktop wallpaper. Terminals stay opaque."
+							}
+							ui.Text(c, description).FontSize(11.5).TextColor(k.textFaint)
+						})
 						a.terminalThemeSettings(c, k)
 
 					case "Terminal":
@@ -263,6 +304,8 @@ func (a *App) settingsPanel(c *ui.Context, k *colors) {
 							}
 							ui.Text(c, "Used by + and New Tab. Existing sessions keep their shell.").FontSize(11.5).TextColor(k.textFaint)
 						})
+
+						a.terminalBehaviorSettings(c, k)
 
 					case "Keyboard Shortcuts":
 						a.keyboardShortcutSettings(c, k)

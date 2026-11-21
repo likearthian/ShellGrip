@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gorex/internal/rex"
+	"gorex/internal/session"
 )
 
 // TestAttention checks that a pane whose program finished out of sight
@@ -19,9 +19,9 @@ func TestAttention(t *testing.T) {
 	if a.tab().Focus == p {
 		t.Fatal("the first tab is not out of sight")
 	}
-	running := rex.SessionInfo{ID: p.SID, Program: "sleep", Idle: false, LastInput: time.Now()}
+	running := session.Info{ID: p.SID, Program: "sleep", Idle: false, LastInput: time.Now()}
 	p.info = running
-	a.apply(map[string]rex.SessionInfo{p.SID: {ID: p.SID, Program: "cmd", Idle: true}})
+	a.apply(p, session.Info{ID: p.SID, Program: "cmd", Idle: true})
 	if !p.attention || p.attentionAt.IsZero() {
 		t.Fatalf("attention %v at %v, after its program finished out of sight", p.attention, p.attentionAt)
 	}

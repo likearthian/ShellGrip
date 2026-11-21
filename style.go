@@ -9,9 +9,8 @@ import (
 
 // colors are the app's own, in light and dark windows.
 type colors struct {
-	// The window's background: a gradient from top through mid to bottom,
-	// and a tint toward the right.
-	bgTop, bgMid, bgLow, bgBottom, bgTint ui.Color
+	// the window chrome stays flat around the inset workspace panels.
+	background, accent ui.Color
 
 	card, cardFocused, cardBorder, cardBorderFocused ui.Color
 	shadow, shadowFocused                            ui.Color
@@ -19,8 +18,8 @@ type colors struct {
 	text, textMuted, textFaint, iconMuted ui.Color
 	hover, pressed                        ui.Color
 
-	track, trackBorder, tabActive, tabSep ui.Color
-	tileRim                               ui.Color
+	track, tabActive, tabSep ui.Color
+	tileRim                  ui.Color
 
 	busy, attention, exited ui.Color
 
@@ -28,77 +27,69 @@ type colors struct {
 }
 
 var lightColors = colors{
-	bgTop:    ui.Hex("#f6e7f6"),
-	bgMid:    ui.Hex("#efe1e6"),
-	bgLow:    ui.Hex("#eee0d3"),
-	bgBottom: ui.Hex("#ece1bd"),
-	bgTint:   ui.RGBA(242, 214, 222, 0.35),
+	background: ui.Hex("#e9eaec"),
+	accent:     ui.Hex("#4678c7"),
 
-	card:              ui.RGBA(255, 255, 255, 0.66),
-	cardFocused:       ui.RGBA(255, 255, 255, 0.95),
-	cardBorder:        ui.RGBA(255, 255, 255, 0.72),
-	cardBorderFocused: ui.RGBA(255, 255, 255, 1),
-	shadow:            ui.RGBA(60, 40, 50, 0.07),
-	shadowFocused:     ui.RGBA(60, 40, 50, 0.12),
+	card:              ui.Hex("#f2f3f5"),
+	cardFocused:       ui.Hex("#ffffff"),
+	cardBorder:        ui.Hex("#d9dce1"),
+	cardBorderFocused: ui.Hex("#b6becb"),
+	shadow:            ui.RGBA(30, 35, 45, 0.04),
+	shadowFocused:     ui.RGBA(30, 35, 45, 0.08),
 
-	text:      ui.Hex("#1d1d1f"),
-	textMuted: ui.Hex("#636366"),
-	textFaint: ui.Hex("#8e8e93"),
-	iconMuted: ui.Hex("#8a8a8f"),
-	hover:     ui.RGBA(0, 0, 0, 0.055),
-	pressed:   ui.RGBA(0, 0, 0, 0.1),
+	text:      ui.Hex("#24272c"),
+	textMuted: ui.Hex("#616771"),
+	textFaint: ui.Hex("#717782"),
+	iconMuted: ui.Hex("#777d87"),
+	hover:     ui.Hex("#e5e7eb"),
+	pressed:   ui.Hex("#d9dde4"),
 
-	track:       ui.RGBA(255, 255, 255, 0.34),
-	trackBorder: ui.RGBA(255, 255, 255, 0.45),
-	tabActive:   ui.RGBA(255, 255, 255, 0.97),
-	tabSep:      ui.RGBA(0, 0, 0, 0.13),
-	tileRim:     ui.RGBA(255, 255, 255, 0.95),
+	track:     ui.Hex("#e5e7eb"),
+	tabActive: ui.Hex("#f7f8fa"),
+	tabSep:    ui.Hex("#d0d4db"),
+	tileRim:   ui.Hex("#d9dce1"),
 
-	busy:      ui.Hex("#34a853"),
-	attention: ui.Hex("#f59e0b"),
-	exited:    ui.Hex("#a1a1a6"),
+	busy:      ui.Hex("#348753"),
+	attention: ui.Hex("#b57b25"),
+	exited:    ui.Hex("#858b95"),
 
-	panel:       ui.RGBA(252, 252, 253, 0.97),
-	panelBorder: ui.RGBA(0, 0, 0, 0.08),
-	panelSel:    ui.RGBA(46, 111, 208, 0.12),
-	backdrop:    ui.RGBA(40, 20, 40, 0.06),
+	panel:       ui.Hex("#f7f8fa"),
+	panelBorder: ui.Hex("#d9dce1"),
+	panelSel:    ui.Hex("#d4e2fa"),
+	backdrop:    ui.RGBA(24, 26, 30, 0.14),
 }
 
 var darkColors = colors{
-	bgTop:    ui.Hex("#382d37"),
-	bgMid:    ui.Hex("#292426"),
-	bgLow:    ui.Hex("#2b2521"),
-	bgBottom: ui.Hex("#3b2f1d"),
-	bgTint:   ui.RGBA(25, 24, 28, 0.32),
+	background: ui.Hex("#252628"),
+	accent:     ui.Hex("#6195ef"),
 
-	card:              ui.RGBA(25, 24, 24, 0.52),
-	cardFocused:       ui.RGBA(57, 51, 53, 0.38),
-	cardBorder:        ui.RGBA(211, 190, 173, 0.15),
-	cardBorderFocused: ui.RGBA(220, 198, 202, 0.23),
-	shadow:            ui.RGBA(12, 9, 10, 0.18),
-	shadowFocused:     ui.RGBA(12, 9, 10, 0.24),
+	card:              ui.Hex("#1e1f21"),
+	cardFocused:       ui.Hex("#191a1c"),
+	cardBorder:        ui.Hex("#2c2e31"),
+	cardBorderFocused: ui.Hex("#3b3e43"),
+	shadow:            ui.RGBA(12, 14, 18, 0.05),
+	shadowFocused:     ui.RGBA(12, 14, 18, 0.10),
 
-	text:      ui.Hex("#d3d0d3"),
-	textMuted: ui.Hex("#aaa5aa"),
-	textFaint: ui.Hex("#8b858b"),
-	iconMuted: ui.Hex("#827d83"),
-	hover:     ui.RGBA(231, 220, 228, 0.08),
-	pressed:   ui.RGBA(231, 220, 228, 0.14),
+	text:      ui.Hex("#d7dae0"),
+	textMuted: ui.Hex("#a3a8b2"),
+	textFaint: ui.Hex("#9399a4"),
+	iconMuted: ui.Hex("#8c919b"),
+	hover:     ui.Hex("#292b2f"),
+	pressed:   ui.Hex("#32353b"),
 
-	track:       ui.RGBA(210, 195, 209, 0.08),
-	trackBorder: ui.RGBA(221, 209, 221, 0.04),
-	tabActive:   ui.RGBA(221, 209, 221, 0.13),
-	tabSep:      ui.RGBA(221, 209, 221, 0.13),
-	tileRim:     ui.RGBA(232, 220, 229, 0.24),
+	track:     ui.Hex("#222326"),
+	tabActive: ui.Hex("#252628"),
+	tabSep:    ui.Hex("#36383c"),
+	tileRim:   ui.Hex("#454950"),
 
-	busy:      ui.Hex("#4ade80"),
-	attention: ui.Hex("#fbbf24"),
-	exited:    ui.Hex("#636366"),
+	busy:      ui.Hex("#73bd91"),
+	attention: ui.Hex("#d8b16b"),
+	exited:    ui.Hex("#737983"),
 
-	panel:       ui.RGBA(43, 38, 43, 0.98),
-	panelBorder: ui.RGBA(220, 198, 202, 0.18),
-	panelSel:    ui.RGBA(108, 178, 255, 0.18),
-	backdrop:    ui.RGBA(0, 0, 0, 0.2),
+	panel:       ui.Hex("#191a1c"),
+	panelBorder: ui.Hex("#303236"),
+	panelSel:    ui.Hex("#2d4672"),
+	backdrop:    ui.RGBA(10, 12, 16, 0.40),
 }
 
 func colorsOf(c *ui.Context) *colors {
@@ -108,15 +99,19 @@ func colorsOf(c *ui.Context) *colors {
 	return &lightColors
 }
 
-// paintBackground paints the window's background.
-func paintBackground(p *ui.Painter, r ui.Rect, k *colors) {
-	h1, h2 := r.H*0.38, r.H*0.32
-	p.FillGradient(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: h1 + 1}, ui.LinearGradient{From: k.bgTop, To: k.bgMid, Angle: 180}, 0)
-	p.FillGradient(ui.Rect{X: r.X, Y: r.Y + h1, W: r.W, H: h2 + 1}, ui.LinearGradient{From: k.bgMid, To: k.bgLow, Angle: 180}, 0)
-	p.FillGradient(ui.Rect{X: r.X, Y: r.Y + h1 + h2, W: r.W, H: r.H - h1 - h2}, ui.LinearGradient{From: k.bgLow, To: k.bgBottom, Angle: 180}, 0)
-	clear := k.bgTint
-	clear.A = 0
-	p.FillGradient(r, ui.LinearGradient{From: clear, To: k.bgTint, Angle: 90, Start: 0.35, End: 1}, 0)
+// applyUITheme keeps built-in controls in step with the app's surfaces.
+func applyUITheme(c *ui.Context, k *colors) {
+	theme := *c.Theme()
+	theme.Font, theme.Radius = uiFontFamily, 6
+	theme.Background = k.background
+	theme.Surface, theme.SurfaceHover, theme.SurfacePressed = k.tabActive, k.hover, k.pressed
+	theme.Border, theme.Text, theme.TextMuted = k.panelBorder, k.text, k.textMuted
+	theme.Accent, theme.AccentHover, theme.AccentPressed = k.accent, k.accent.Mix(k.text, 0.12), k.accent.Mix(k.background, 0.15)
+	theme.AccentText = k.background
+	theme.Selection, theme.Focus = k.panelSel, k.accent.Alpha(0.7)
+	theme.Scrollbar = k.iconMuted.Alpha(0.5)
+	theme.Inverse, theme.InverseText = k.pressed, k.text
+	c.SetTheme(&theme)
 }
 
 //go:embed assets/fonts/JetBrainsMono-Regular.ttf
@@ -152,10 +147,10 @@ func registerFonts() {
 
 var termFont = terminal.Font{Family: terminalFontFamily(defaultFontFamily), Size: 11.6, LineHeight: 1.0}
 
-// The terminals' colors: soft ink on the panes' paper, and the dark kind.
+// the default terminal colors share the workspace surfaces.
 var lightTerm = &terminal.Theme{
 	Foreground: ui.Hex("#2a2d31"),
-	Background: ui.Hex("#fbfbfb"),
+	Background: ui.Hex("#ffffff"),
 	Cursor:     ui.Hex("#3a3d42"),
 	Selection:  ui.RGBA(46, 111, 208, 0.2),
 	Palette: [16]ui.Color{
@@ -167,14 +162,14 @@ var lightTerm = &terminal.Theme{
 }
 
 var darkTerm = &terminal.Theme{
-	Foreground: ui.Hex("#cecdcf"),
-	Background: ui.Hex("#252223"),
-	Cursor:     ui.Hex("#cecdcf"),
-	Selection:  ui.RGBA(108, 178, 255, 0.28),
+	Foreground: ui.Hex("#d7dae0"),
+	Background: ui.Hex("#191a1c"),
+	Cursor:     ui.Hex("#d7dae0"),
+	Selection:  ui.Hex("#2d4672"),
 	Palette: [16]ui.Color{
-		ui.Hex("#393536"), ui.Hex("#db656c"), ui.Hex("#36b66b"), ui.Hex("#c59b48"),
-		ui.Hex("#429cdb"), ui.Hex("#aa80c8"), ui.Hex("#19adb8"), ui.Hex("#cecdcf"),
-		ui.Hex("#817b80"), ui.Hex("#eb8487"), ui.Hex("#69c788"), ui.Hex("#ddbc75"),
-		ui.Hex("#78b5e4"), ui.Hex("#c3a1d9"), ui.Hex("#60c8cd"), ui.Hex("#eeecee"),
+		ui.Hex("#2c2e33"), ui.Hex("#db656c"), ui.Hex("#36b66b"), ui.Hex("#c59b48"),
+		ui.Hex("#6195ef"), ui.Hex("#aa80c8"), ui.Hex("#19adb8"), ui.Hex("#cecdcf"),
+		ui.Hex("#8c919b"), ui.Hex("#eb8487"), ui.Hex("#69c788"), ui.Hex("#ddbc75"),
+		ui.Hex("#85aff5"), ui.Hex("#c3a1d9"), ui.Hex("#60c8cd"), ui.Hex("#eeecee"),
 	},
 }

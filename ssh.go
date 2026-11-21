@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gorex/internal/rex"
+	"gorex/internal/appdir"
 )
 
 // sshConnection is an SSH target the user saved. Aliases name a Host of
@@ -41,8 +41,8 @@ type sshFile struct {
 	Connections []sshConnection `json:"connections"`
 }
 
-// sshPath returns the connections' file, beside the server's state.
-func sshPath() string { return filepath.Join(rex.Dir(), "ssh.json") }
+// sshPath returns the connections' file, in the app's data directory.
+func sshPath() string { return filepath.Join(appdir.Dir(), "ssh.json") }
 
 // loadSSHConnections reads the saved connections, and repairs what an
 // older or hand-edited file may lack.
@@ -75,10 +75,9 @@ func loadSSHConnections() []sshConnection {
 	return out
 }
 
-// saveSSHConnections keeps the connections on disk, as the server keeps
-// the layout.
+// saveSSHConnections keeps the connections on disk, atomically.
 func saveSSHConnections(conns []sshConnection) error {
-	if err := os.MkdirAll(rex.Dir(), 0o700); err != nil {
+	if err := os.MkdirAll(appdir.Dir(), 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(sshFile{Connections: conns}, "", "  ")
@@ -134,7 +133,7 @@ func (c sshConnection) detail() string {
 // macOS and Linux, the remote tree joins the terminal's authenticated
 // connection rather than asking again. Windows's OpenSSH has no
 // multiplexing.
-func controlPath() string { return filepath.Join(rex.Dir(), "ssh-%C") }
+func controlPath() string { return filepath.Join(appdir.Dir(), "ssh-%C") }
 
 // multiplexed reports whether ssh connections are shared, as unix ssh
 // does.

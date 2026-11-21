@@ -104,9 +104,7 @@ func TestGitChipLoadsRepository(t *testing.T) {
 	runGit(t, dir, "add", "notes.txt")
 	runGit(t, dir, "commit", "-m", "first")
 
-	a, tt := newTestApp(t)
-	p := a.tab().Focus
-	p.info.Dir, p.startDir = dir, dir
+	_, tt := newTestAppInDir(t, dir)
 	waitFor(t, tt, "the branch chip of a real repository", func() bool {
 		_, ok := tt.Find("Switch branch: main")
 		return ok

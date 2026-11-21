@@ -142,12 +142,11 @@ func (a *App) installedVSCode(now time.Time) string {
 func (a *App) openPaneInVSCode(c *ui.Context, p *Pane, editor string) {
 	reported := p.reportedDirectory()
 	// The lookup runs off the UI thread with its own pane snapshot.
-	lookup := &Pane{SID: p.SID, profile: p.profile, info: p.info, startDir: p.directory()}
-	client := a.client
+	lookup := &Pane{sess: p.sess, profile: p.profile, info: p.info, startDir: p.directory()}
 	a.openVSCodeTarget(c, editor, lookup.profile.WSL, func() string {
 		dir := reported
 		if dir == "" {
-			dir = (&App{client: client}).splitDirectory(lookup)
+			dir = lookup.splitDirectory()
 		}
 		if lookup.profile.WSL {
 			return vscodeWSLFolder(lookup.profile.distribution(), dir)

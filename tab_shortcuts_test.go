@@ -86,8 +86,7 @@ func TestTabHintDisplay(t *testing.T) {
 	if a.tabHints {
 		t.Fatal("short Ctrl press showed hints")
 	}
-	a.ctrlHeldAt = time.Now().Add(-time.Second)
-	tt.Frame()
+	tt.Advance(tabHintDelay)
 	for number := 0; number <= 9; number++ {
 		if rect, ok := tt.Find(fmt.Sprintf("Tab shortcut Ctrl+%d", number)); !ok || rect.H == 0 {
 			t.Fatalf("missing visible hint for Ctrl+%d", number)
@@ -104,8 +103,7 @@ func TestTabHintDisplay(t *testing.T) {
 	a.fontFamilies = []string{defaultFontFamily}
 	a.openSettings()
 	tt.HoldModifiers(ui.Ctrl)
-	a.ctrlHeldAt = time.Now().Add(-time.Second)
-	tt.Frame()
+	tt.Advance(tabHintDelay)
 	if !a.tabHints {
 		t.Fatal("tab hints unavailable in Settings")
 	}

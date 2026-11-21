@@ -12,7 +12,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"gorex/internal/rex"
+	"gorex/internal/session"
 )
 
 // testShell is the shell of the tests: its prompt ends with prompt, and
@@ -27,8 +27,7 @@ var testShell = func() (s struct{ path, prompt, run, program, dir string }) {
 	return
 }()
 
-// testDir is a directory of the tests' own: in /tmp, whose path is short
-// enough for the socket, on macOS.
+// testDir is a directory of the tests' own, for the data the app keeps.
 func testDir(t *testing.T) string {
 	base := "/tmp"
 	if runtime.GOOS == "windows" {
@@ -41,46 +40,54 @@ func testDir(t *testing.T) string {
 	return dir
 }
 
-// newTestApp starts a session server of its own and an app on it, whose
-// view runs without a window.
+// newTestApp starts an app whose view runs without a window.
 func newTestApp(t *testing.T) (*App, *ui.Tester) {
+	t.Helper()
+	return newTestAppInDir(t, os.TempDir())
+}
+
+func newTestAppInDir(t *testing.T, directory string) (*App, *ui.Tester) {
 	t.Helper()
 	dir := testDir(t)
 	t.Setenv("GOREX_DIR", dir)
 	t.Setenv("SHELL", testShell.path)
-	go rex.Serve()
-	var client *rex.Client
-	for i := 0; i < 100; i++ {
-		if _, err := os.Stat(rex.SocketPath()); err == nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	client, err := rex.Connect()
-	if err != nil {
-		t.Fatal(err)
-	}
+	registerFonts()
+	a := &App{}
+	a.newTab(directory)
 	t.Cleanup(func() {
-		client.Shutdown()
-		time.Sleep(100 * time.Millisecond)
+		closeTestSessions(a)
 		os.RemoveAll(dir)
 	})
-	registerFonts()
-	a := &App{client: client}
-	a.newTab(os.TempDir())
 	tt := ui.NewTester(a.view, 1000, 620)
 	return a, tt
 }
 
-// refresh asks the server what runs in the sessions, as the window does
-// every half second.
-func refresh(a *App) {
-	infos, _ := a.client.List()
-	byID := map[string]rex.SessionInfo{}
-	for _, in := range infos {
-		byID[in.ID] = in
+// closeTestSessions ends the sessions of an app's panes.
+func closeTestSessions(a *App) {
+	a.closeFileWatches()
+	for _, t := range a.tabs {
+		for _, p := range t.panes() {
+			p.closed = true
+			if p.term != nil {
+				p.term.Close()
+			}
+			if p.sess != nil {
+				p.sess.Close()
+			}
+		}
 	}
-	a.apply(byID)
+}
+
+// refresh asks each session what runs in it, as the window does every
+// half second.
+func refresh(a *App) {
+	for _, t := range a.tabs {
+		for _, p := range t.panes() {
+			if p.sess != nil {
+				a.apply(p, p.sess.Info())
+			}
+		}
+	}
 }
 
 // waitFor runs frames until cond holds, or fails after a few seconds.
@@ -92,6 +99,7 @@ func waitFor(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
 			t.Fatalf("timed out waiting for %s; texts %q", what, tt.Texts())
 		}
 		time.Sleep(20 * time.Millisecond)
+		tt.Advance(20 * time.Millisecond)
 		tt.Frame()
 	}
 }
@@ -196,11 +204,11 @@ func TestRestore(t *testing.T) {
 	for _, tab := range a.tabs {
 		for _, p := range tab.panes() {
 			sids[p.SID] = true
-			p.term.Close() // detach, as when the app quits
 		}
 	}
-	// Another app, as the next launch, finds them all.
-	b := &App{client: a.client}
+	// Another app, as the next launch, restores the tabs with new shells.
+	b := &App{}
+	t.Cleanup(func() { closeTestSessions(b) })
 	if !b.restore() {
 		t.Fatal("nothing restored")
 	}
@@ -212,8 +220,8 @@ func TestRestore(t *testing.T) {
 	}
 	for _, tab := range b.tabs {
 		for _, p := range tab.panes() {
-			if !sids[p.SID] || p.restored {
-				t.Errorf("pane of session %q not attached again", p.SID)
+			if !p.restored || p.SID == "" || sids[p.SID] {
+				t.Errorf("pane of session %q was not started anew", p.SID)
 			}
 		}
 	}
@@ -222,11 +230,11 @@ func TestRestore(t *testing.T) {
 func TestLabels(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	site, short := filepath.Join(home, "Sites", "rex-snake"), filepath.Join("~", "Sites", "rex-snake")
-	p := &Pane{info: rex.SessionInfo{Shell: "zsh", Program: "zsh", Idle: true, Dir: site}}
+	p := &Pane{info: session.Info{Shell: "zsh", Program: "zsh", Idle: true, Dir: site}}
 	if n, d := p.label(); n != "zsh" || d != short {
 		t.Errorf("shell label %q %q", n, d)
 	}
-	p.info = rex.SessionInfo{Shell: "fish", Program: "lazygit", Dir: site}
+	p.info = session.Info{Shell: "fish", Program: "lazygit", Dir: site}
 	p.title = "lazygit ~/Sites/rex-snake"
 	if n, d := p.label(); n != "Git Changes" || d != short {
 		t.Errorf("lazygit label %q %q", n, d)
@@ -236,12 +244,12 @@ func TestLabels(t *testing.T) {
 	if n, d := p.label(); n != p.title || d != "" {
 		t.Errorf("codex label %q %q", n, d)
 	}
-	p.info, p.title = rex.SessionInfo{Shell: "zsh", Program: "ssh", Args: []string{"ssh", "-p", "22", "box.local"}}, ""
+	p.info, p.title = session.Info{Shell: "zsh", Program: "ssh", Args: []string{"ssh", "-p", "22", "box.local"}}, ""
 	if n, d := p.label(); n != "SSH" || d != "box.local" {
 		t.Errorf("ssh label %q %q", n, d)
 	}
 	// Windows's consoles name the shell in their title as a program runs.
-	p.info, p.title = rex.SessionInfo{Shell: "cmd", Program: "node", Dir: site}, `C:\WINDOWS\system32\cmd.exe - node app.js`
+	p.info, p.title = session.Info{Shell: "cmd", Program: "node", Dir: site}, `C:\WINDOWS\system32\cmd.exe - node app.js`
 	if n, d := p.label(); n != "Node" || d != short {
 		t.Errorf("node label %q %q", n, d)
 	}
@@ -305,7 +313,7 @@ func TestPaletteScrolls(t *testing.T) {
 	a := &App{}
 	tab := &Tab{ID: 1}
 	for i := range 20 {
-		n := &Node{Pane: &Pane{ID: i, Tab: tab, info: rex.SessionInfo{Shell: fmt.Sprintf("shell%02d", i)}}}
+		n := &Node{Pane: &Pane{ID: i, Tab: tab, info: session.Info{Shell: fmt.Sprintf("shell%02d", i)}}}
 		n.Pane.Node = n
 		if tab.Root == nil {
 			tab.Root = n

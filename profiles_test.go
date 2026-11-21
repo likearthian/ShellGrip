@@ -91,17 +91,12 @@ func TestTerminalProfilePicker(t *testing.T) {
 		t.Fatal("restart lost its profile")
 	}
 	a.saveNow()
-	b := &App{client: a.client}
-	if !b.restore() || b.tab().Focus.profile.ID != profile.ID {
+	b := &App{}
+	t.Cleanup(func() { closeTestSessions(b) })
+	if !b.restore() || b.tab().Focus.profile.ID != profile.ID || !b.tab().Focus.restored {
 		t.Fatal("restored pane lost its profile")
 	}
-	// Force recreation instead of reattaching to the saved session.
-	a.client.Kill(b.tab().Focus.SID)
-	c := &App{client: a.client}
-	if !c.restore() || !c.tab().Focus.restored || c.tab().Focus.profile.ID != profile.ID {
-		t.Fatal("recreated pane lost its profile")
-	}
-	for _, app := range []*App{a, b, c} {
+	for _, app := range []*App{a, b} {
 		for _, tab := range app.tabs {
 			for _, pane := range tab.panes() {
 				pane.closed = true

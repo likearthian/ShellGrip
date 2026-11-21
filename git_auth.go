@@ -26,6 +26,7 @@ type gitAuthState struct {
 	detail   string
 	username string
 	password string
+	remember bool
 	error    string
 }
 

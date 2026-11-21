@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
+
+	"gorex/internal/terminal"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -30,5 +34,43 @@ func TestCopyToast(t *testing.T) {
 	a.selectionCopied("")
 	if a.copiedCharacters != 0 {
 		t.Fatal("empty selection scheduled a toast")
+	}
+}
+
+func TestTerminalCopySources(t *testing.T) {
+	a := &App{}
+	a.terminalCopied("program clipboard", terminal.CopyProgram)
+	if a.copiedCharacters != 0 {
+		t.Fatal("a program's clipboard write scheduled selection feedback")
+	}
+	for _, source := range []terminal.CopySource{terminal.CopyUser, terminal.CopySelect} {
+		a.terminalCopied("é漢🙂", source)
+		if a.copiedCharacters != 3 {
+			t.Fatalf("copy source %v lost Unicode copy feedback", source)
+		}
+		a.copiedCharacters = 0
+	}
+}
+
+func TestTerminalZoomSavesSharedFontSize(t *testing.T) {
+	t.Setenv("GOREX_DIR", t.TempDir())
+	oldPrefs, oldFont := prefs, termFont
+	t.Cleanup(func() { prefs, termFont = oldPrefs, oldFont })
+	a := &App{}
+	termFont.Size = defaultFontSize
+	if !a.terminalZoom(terminal.Zoom{Steps: 2}) || prefs.FontSize != defaultFontSize+2 {
+		t.Fatal("terminal zoom did not update the saved font size")
+	}
+	data, err := os.ReadFile(settingsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved settings
+	if err := json.Unmarshal(data, &saved); err != nil || saved.FontSize != defaultFontSize+2 {
+		t.Fatalf("terminal zoom was not persisted: %s, %v", data, err)
+	}
+	a.terminalZoom(terminal.Zoom{Reset: true})
+	if termFont.Size != defaultFontSize || prefs.FontSize != defaultFontSize {
+		t.Fatal("terminal zoom did not reset to GoRex's default")
 	}
 }

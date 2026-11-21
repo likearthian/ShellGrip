@@ -61,7 +61,6 @@ var (
 	cmdLight         = command{Title: "Appearance: Light", Run: func(a *App) { a.setAppearance("light") }}
 	cmdDark          = command{Title: "Appearance: Dark", Run: func(a *App) { a.setAppearance("dark") }}
 	cmdSystem        = command{Title: "Appearance: System", Run: func(a *App) { a.setAppearance("") }}
-	cmdEndAll        = command{Title: "Quit and End All Sessions", Accel: "CmdOrCtrl+Alt+Q", Keys: "⌥⌘Q", Run: func(a *App) { a.quitAndEnd() }}
 )
 
 // paletteCommands are those the command palette lists, before the tabs.
@@ -75,7 +74,7 @@ var paletteCommands = []*command{
 	&cmdFocusLeft, &cmdFocusRight, &cmdFocusUp, &cmdFocusDown,
 	&cmdGrowLeft, &cmdGrowRight, &cmdGrowUp, &cmdGrowDown,
 	&cmdBigger, &cmdSmaller, &cmdActualSize, &cmdLight, &cmdDark, &cmdSystem,
-	&cmdClearScroll, &cmdRestart, &cmdEndAll,
+	&cmdClearScroll, &cmdRestart,
 }
 
 // commands are all of them.
@@ -135,7 +134,6 @@ func (a *App) menu() *mygo.Menu {
 			item(&cmdCloseTab),
 			mygo.Separator(),
 			item(&cmdRestart),
-			item(&cmdEndAll),
 		}},
 		{Label: "Edit", Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleUndo},
@@ -188,15 +186,8 @@ func (a *App) do(fn func()) {
 	a.win.Update(fn)
 }
 
-// run runs a command of the menus, on the main thread. New Tab opens the
-// window again when it was closed.
+// run runs a command of the menus, on the main thread.
 func (a *App) run(cmd *command) {
-	if a.win == nil {
-		if cmd == &cmdNewTab {
-			mygo.RunOnMain(a.open)
-		}
-		return
-	}
 	a.do(func() {
 		if a.win != nil {
 			cmd.Run(a)
@@ -280,7 +271,9 @@ func (a *App) restartFocused() {
 	if old.term != nil {
 		old.term.Close()
 	}
-	go a.client.Kill(old.SID)
+	if old.sess != nil {
+		old.sess.Close()
+	}
 	if t.Zoom == old {
 		t.Zoom = p
 	}
@@ -288,27 +281,6 @@ func (a *App) restartFocused() {
 	t.setFocus(p)
 	a.focusReq = p
 	a.changed()
-}
-
-func (a *App) quitAndEnd() {
-	if !a.exiting.CompareAndSwap(false, true) {
-		return
-	}
-	a.saveNow()
-	a.quitting = true
-	a.closeSFTPSessions()
-	for _, t := range a.tabs {
-		for _, p := range t.panes() {
-			p.closed = true
-		}
-	}
-	c := a.client
-	go func() {
-		if c != nil {
-			c.Shutdown()
-		}
-		mygo.App.Quit()
-	}()
 }
 
 func (a *App) openPalette() {

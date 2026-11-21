@@ -12,27 +12,37 @@ import (
 const (
 	gap       = 8  // between panes, and around them
 	titleH    = 44 // the title bar
-	cardR     = 12 // the panes' corners
+	cardR     = 10 // the panes' corners
 	headerH   = 33 // the panes' headers
 	activeFor = 1500 * time.Millisecond
 )
 
 func (a *App) view(c *ui.Context) {
-	theme := *c.Theme()
-	theme.Font = uiFontFamily
-	c.SetTheme(&theme)
+	k := colorsOf(c)
+	applyUITheme(c, k)
 	a.services = c.Services()
 	a.runPosted()
-	k := colorsOf(c)
+	a.openPendingTerminalFile(c)
 	a.focusedWin = a.win == nil || a.win.IsFocused()
+	a.syncSSHWatch(c)
+	a.syncFileWatches(c)
 	// The window stops asking for the user once it has them, or once no
 	// pane waits for them any more.
 	if a.focusedWin || !a.attention() {
 		a.settleWindow()
 	}
 	a.updateTabHints(c)
-	c.Root().Background(k.bgBottom)
-	ui.Column(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) { paintBackground(p, r, k) }).Children(func() {
+	vibrant := prefs.ChromeVibrancy && c.Vibrancy()
+	if vibrant {
+		c.Root().Background(ui.Transparent)
+	} else {
+		c.Root().Background(k.background)
+	}
+	root := ui.Column(c).Fill()
+	if !vibrant {
+		root.Background(k.background)
+	}
+	root.Children(func() {
 		a.titleBar(c, k)
 		content := ui.Row(c).Grow(1).MinHeight(0).Padding(0, gap, gap, gap).AlignItems(ui.Stretch)
 		content.Children(func() {
@@ -139,7 +149,7 @@ func (a *App) windowControls(c *ui.Context, k *colors) {
 				win.Maximize()
 			}
 		}
-		b := ui.Box(c).Size(30, 30).Center().Radius(30 / 2.6).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label("Close").Tooltip("Close")
+		b := ui.Box(c).Size(30, 30).Center().Radius(6).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label("Close").Tooltip("Close")
 		col := k.iconMuted
 		if b.Pressed() {
 			b.Background(closeRed.Alpha(0.8))
@@ -173,7 +183,7 @@ func tip(label string, cmd *command) string {
 // iconButton is a borderless button of an icon, with a face on hover;
 // label names it for screen readers and its tooltip.
 func iconButton(c *ui.Context, k *colors, name, label string, size, iconSize float32) ui.Element {
-	b := ui.Box(c).Size(size, size).Center().Radius(size / 2.6).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(label)
+	b := ui.Box(c).Size(size, size).Center().Radius(6).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(label)
 	if b.Pressed() {
 		b.Background(k.pressed)
 	} else if b.Hovered() {
@@ -272,27 +282,10 @@ func (a *App) paneCard(c *ui.Context, k *colors, t *Tab, p *Pane) ui.Element {
 	if focused {
 		bg, border, shadow = k.cardFocused, k.cardBorderFocused, k.shadowFocused
 	}
-	if prefs.PaneFocusCues {
-		bg = k.bgTop
-		if focused {
-			bg, border = k.cardFocused, ui.Hex("#a18aa6")
-			if c.Theme().Dark {
-				bg, border = ui.Hex("#403540"), ui.RGBA(220, 198, 222, 0.65)
-			}
-		}
+	if prefs.PaneFocusCues && focused {
+		border = k.accent.Alpha(0.65)
 	}
-	card.Background(bg).Border(1, border).
-		Shadow(0, 1, 2, 0, shadow).
-		Shadow(0, 4, 14, -2, shadow)
-	if c.Theme().Dark && focused {
-		card.Draw(func(p *ui.Painter, r ui.Rect) {
-			p.FillGradient(r, ui.LinearGradient{
-				From:  ui.RGBA(235, 215, 230, 0.06),
-				To:    ui.RGBA(235, 215, 230, 0),
-				Angle: 180, End: 0.14,
-			}, cardR)
-		})
-	}
+	card.Background(bg).Border(1, border).Shadow(0, 1, 3, 0, shadow)
 	card.Transition(ui.ElementTransition{Colors: true, Duration: 160 * time.Millisecond})
 	hovered := card.Hovered()
 	card.Children(func() {
@@ -308,6 +301,10 @@ func (a *App) paneCard(c *ui.Context, k *colors, t *Tab, p *Pane) ui.Element {
 				return
 			}
 			tv := terminal.View(c, p.term).Fill()
+			// dim the shell's text and colors while another pane owns input.
+			if prefs.PaneFocusCues && !focused {
+				tv.Opacity(0.55)
+			}
 			if a.focusReq == p && a.tab() == t {
 				tv.Focus()
 				a.focusReq = nil
@@ -341,6 +338,11 @@ func (a *App) paneHeader(c *ui.Context, k *colors, t *Tab, p *Pane, focused, hov
 		prog = programOf("ssh")
 	}
 	h := ui.Row(c).Height(headerH).Padding(0, 8, 0, 12).Gap(7).AlignItems(ui.Center).MinWidth(0)
+	// The pane in use takes the sidebar's surface for its header; the others
+	// keep the card's.
+	if focused {
+		h.Background(sidebarColors(c, k).panel)
+	}
 	if h.DoubleClicked() {
 		t.setFocus(p)
 		a.toggleZoom()
@@ -370,7 +372,7 @@ func (a *App) paneHeader(c *ui.Context, k *colors, t *Tab, p *Pane, focused, hov
 		}
 		if focused && prefs.PaneFocusCues {
 			ui.Text(c, "Active").FontSize(10).FontWeight(600).TextColor(k.text).
-				Padding(2, 6).Radius(4).Background(k.hover).Shrink(0)
+				Padding(2, 6).Radius(4).Background(k.panelSel).Shrink(0)
 		}
 		show := focused || hovered
 		ui.Row(c).Gap(1).AlignItems(ui.Center).Opacity(map[bool]float32{true: 1, false: 0}[show]).Children(func() {
@@ -455,7 +457,7 @@ func activityDot(c *ui.Context, col ui.Color, size float32) ui.Element {
 	return e
 }
 
-// errorBanner shows what went wrong with the server.
+// errorBanner shows what went wrong.
 func (a *App) errorBanner(c *ui.Context, k *colors) {
 	ui.Overlay(c, func() {
 		ui.Row(c).Absolute().Bottom(18).Left(0).Right(0).Justify(ui.Center).PassThrough().Children(func() {

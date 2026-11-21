@@ -1,8 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"os"
 	"path"
@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"gorex/internal/appdir"
 )
 
 // remoteTreeState is the sidebar's view of an SSH pane's folder: what the
 // folder holds, with the folders the user opened, as the local tree does.
 type remoteTreeState struct {
+	dirty    bool
 	pane     *Pane
 	session  *sftpSession
 	root     string
@@ -118,7 +120,11 @@ func (s *remoteTreeState) load(services ui.Services) {
 				return
 			}
 			s.loading, s.loaded = false, true
-			s.next = time.Now().Add(remoteTreeRefresh)
+			s.next = time.Now().Add(app.remoteWatchInterval(s.session))
+			if s.dirty {
+				s.dirty = false
+				s.next = time.Time{}
+			}
 			s.rows, s.root = rows, root
 		})
 		services.Invalidate()
@@ -182,7 +188,7 @@ func (s *remoteTreeState) reload() {
 func (a *App) remoteTreePanel(c *ui.Context, k *colors, p *Pane, width float32) {
 	k = sidebarColors(c, k)
 	s := a.refreshRemoteTree(c, p)
-	c.After(remoteTreeRefresh)
+	c.After(a.remoteWatchInterval(s.session))
 	ui.Column(c.Key("remote-tree")).Width(width).Shrink(0).MinHeight(0).
 		Radius(cardR).Background(k.panel).Clip().Children(func() {
 		ui.Row(c).Height(36).Padding(0, 10).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -205,11 +211,8 @@ func (a *App) remoteTreePanel(c *ui.Context, k *colors, p *Pane, width float32) 
 			selected = root
 		}
 		message := ""
-		switch {
-		case root == "":
+		if root == "" {
 			message = "Waiting for the connection…"
-		case s.loading && !s.loaded:
-			message = "Loading…"
 		}
 		// A List builds only the rows in view, as the local tree's does: a
 		// remote folder of thousands reads as fast as its first page.
@@ -267,6 +270,9 @@ func (a *App) remoteTreeRootRow(c *ui.Context, k *colors, s *remoteTreeState, ro
 			name = root
 		}
 		ui.Text(c, name).FontSize(13).FontWeight(600).TextColor(k.text).SingleLine().Ellipsis("…").MinWidth(0)
+		if s.loading && !s.loaded {
+			ui.Spinner(c).Size(13, 13).Label("Loading")
+		}
 	})
 }
 
@@ -355,6 +361,7 @@ func (a *App) remoteTreeContextMenu(c *ui.Context, row ui.Element, s *remoteTree
 // remoteTreeStatus carries the connection's state, and the password it
 // may ask for.
 func (a *App) remoteTreeStatus(c *ui.Context, k *colors, s *remoteTreeState) {
+	a.sshWatchStatus(c, k, s.session)
 	sess := s.session
 	switch {
 	case sess == nil:
@@ -373,6 +380,7 @@ func (a *App) remoteTreeStatus(c *ui.Context, k *colors, s *remoteTreeState) {
 					sess.connect()
 				}
 			})
+			ui.Checkbox(c, &sess.rememberPassword, "Remember in keychain")
 			if sess.err != "" {
 				ui.Text(c, sess.err).FontSize(11).TextColor(k.attention).MaxWidth(260)
 			}
@@ -393,10 +401,13 @@ const remotePreviewLimit = 32 << 20
 // remotePreviewPath is where a remote file is kept for the preview: its
 // name in a folder of its own, so names with the same base do not
 // collide.
-func remotePreviewPath(remotePath string) string {
-	sum := fnv.New32a()
-	sum.Write([]byte(remotePath))
-	dir := filepath.Join(os.TempDir(), "gorex-remote", fmt.Sprintf("%x", sum.Sum32()))
+func remotePreviewPath(p *Pane, remotePath string) string {
+	identity := ""
+	if p != nil && p.profile.SSH != nil {
+		identity = sshRelayKey(*p.profile.SSH)
+	}
+	sum := sha256.Sum256([]byte(identity + "\x00" + remotePath))
+	dir := filepath.Join(appdir.Dir(), "cache", "remote", fmt.Sprintf("%x", sum))
 	os.MkdirAll(dir, 0o700)
 	name := path.Base(remotePath)
 	if name == "." || name == "/" || name == "" {
@@ -407,17 +418,25 @@ func remotePreviewPath(remotePath string) string {
 
 // openRemotePreview downloads a remote file to the cache and shows it in
 // the tab's preview, off the frame.
-func (a *App) openRemotePreview(p *Pane, s *remoteTreeState, remotePath string) {
+func (a *App) openRemotePreview(p *Pane, s *remoteTreeState, remotePath string, places ...terminalFilePlace) {
 	if p == nil || s == nil || s.session == nil || s.session.fs == nil {
 		return
 	}
 	fs := s.session.fs
-	cache := remotePreviewPath(remotePath)
+	var stamp previewFileStamp
+	cache := remotePreviewPath(p, remotePath)
 	fail := func(message string) {
 		a.post(func() { a.err = message })
 		a.invalidate()
 	}
 	go func() {
+		if stat, ok := fs.(interface {
+			Stat(string) (os.FileInfo, error)
+		}); ok {
+			if info, err := stat.Stat(remotePath); err == nil {
+				stamp = previewFileStamp{info.ModTime(), info.Size(), info.Mode(), true}
+			}
+		}
 		file, err := fs.Open(remotePath)
 		if err != nil {
 			fail("Could not open " + remotePath + ": " + err.Error())
@@ -433,13 +452,21 @@ func (a *App) openRemotePreview(p *Pane, s *remoteTreeState, remotePath string) 
 			fail("File is too large to preview: " + remotePath)
 			return
 		}
-		if err := os.WriteFile(cache, data, 0o600); err != nil {
+		if err := writeRemoteCache(cache, data); err != nil {
 			fail("Could not cache " + remotePath + ": " + err.Error())
 			return
 		}
 		a.post(func() {
 			if !p.closed {
-				a.showPreview(p, cache, remotePath)
+				a.showPreview(p, cache, remotePath, places...)
+				t := a.tab()
+				if len(places) > 0 && p.Tab != nil {
+					t = p.Tab
+				}
+				if t != nil && t.preview != nil {
+					t.preview.remoteStamp = stamp
+					t.preview.remoteDigest = sha256.Sum256(data)
+				}
 			}
 		})
 		a.invalidate()

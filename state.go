@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"gorex/internal/terminal"
 
-	"gorex/internal/rex"
+	"gorex/internal/appdir"
+	"gorex/internal/session"
 )
 
 // Tab is a tab of the window: panes in a tree of splits.
@@ -47,17 +49,17 @@ type Node struct {
 	A, B     *Node
 }
 
-// Pane is a terminal attached to a session of the server.
+// Pane is a terminal running a session: a shell in a pseudo-terminal.
 type Pane struct {
-	ID     int
-	SID    string
-	Tab    *Tab
-	Node   *Node
-	term   *terminal.Terminal
-	stream *rex.Stream
+	ID   int
+	SID  string
+	Tab  *Tab
+	Node *Node
+	term *terminal.Terminal
+	sess *session.Session
 
-	// info is what the server last said of the session.
-	info rex.SessionInfo
+	// info is what the session last said of itself.
+	info session.Info
 	// title is the last title the program set.
 	title string
 	// lastData is when the session last printed, in Unix nanoseconds.
@@ -79,15 +81,16 @@ type Pane struct {
 
 // App is the state of GoRex's window.
 type App struct {
+	sshRelays         map[string]*sshRelayInstall
+	sshWatch          *sshRemoteWatch
+	fileWatches       map[string]*localFileWatch
 	vsCodePath        string
 	vsCodeCheckedAt   time.Time
 	vsCodeWSLMessage  string
 	vsCodeWSLHelpOpen bool
 	fileTree          *fileTreeState
 	win               *mygo.Window
-	tray              *mygo.Tray
-	client            *rex.Client
-	hello             rex.Hello
+	host              session.Host
 	err               string
 
 	tabs   []*Tab
@@ -104,10 +107,10 @@ type App struct {
 	paletteSel   int
 	hostOpen     bool
 	aboutOpen    bool
-	// ramApp and ramServer are the memory the app and its server work in,
-	// read while the host's popover is open.
-	ramApp, ramServer uint64
-	ramAt             time.Time
+	// ramApp is the memory the app works in, read while the host's
+	// popover is open.
+	ramApp uint64
+	ramAt  time.Time
 
 	profilesOpen       bool
 	settingsCategory   string
@@ -143,17 +146,24 @@ type App struct {
 	saveDue      bool
 	lastSave     time.Time
 	quitting     bool
-	// exiting lets an explicit quit close the window instead of hiding it.
-	exiting    atomic.Bool
+	// exiting tells that the quit is decided: the window closes, and the
+	// sessions end with it.
+	exiting atomic.Bool
+	// confirming tells that the quit dialog is up, and askQuit lets tests
+	// answer it instead of the native dialog.
+	confirming bool
+	askQuit    func(summary string) bool
 	focusedWin bool
 	// cueOn tells that the window itself asks for the user: its taskbar
 	// button flashes, or its Dock icon bounces, while a pane waits.
-	cueOn            bool
-	lastSnapshot     string
-	title            string
-	ctrlHeldAt       time.Time
-	tabHints         bool
-	copiedCharacters int
+	cueOn               bool
+	lastSnapshot        string
+	layoutMu            sync.Mutex
+	title               string
+	ctrlHeldAt          time.Time
+	tabHints            bool
+	copiedCharacters    int
+	pendingTerminalFile *pendingTerminalFile
 
 	// posted are changes to make in the next frame, from terminals of a
 	// view without a window, as in tests.
@@ -262,13 +272,15 @@ func (a *App) newPaneWithProfile(dir string, cols, rows int, profile terminalPro
 		cols, rows = 80, 24
 	}
 	command, launchDir := profile.launch(dir)
-	info, err := a.client.Create(rex.CreateOptions{Command: command, Dir: launchDir, Env: profile.environment(), Cols: cols, Rows: rows})
+	sess, err := session.New(session.Options{Command: command, Dir: launchDir, Env: profile.environment(), Cols: cols, Rows: rows})
+	p := &Pane{ID: a.id(), startDir: dir, profile: profile}
 	if err != nil {
-		log.Printf("creating a session: %v", err)
+		log.Printf("starting a session: %v", err)
 		a.err = err.Error()
-		info = rex.SessionInfo{ID: "", Exited: true}
+		p.info = session.Info{Exited: true}
+	} else {
+		p.sess, p.SID, p.info = sess, sess.ID(), sess.Info()
 	}
-	p := &Pane{ID: a.id(), SID: info.ID, info: info, startDir: dir, profile: profile}
 	if p.info.Dir == "" {
 		p.info.Dir = dir
 	}
@@ -276,41 +288,35 @@ func (a *App) newPaneWithProfile(dir string, cols, rows int, profile terminalPro
 	return p
 }
 
-// attach makes the pane's terminal, attached to its session.
+// attach makes the pane's terminal, connected to its session.
 func (a *App) attach(p *Pane, cols, rows int) {
-	if p.SID == "" {
-		term, err := terminal.New(terminal.Options{Conn: nopConn{}, Transparent: true, CopyOnSelect: prefs.CopyOnSelect, OnCopySelection: a.selectionCopied, Font: termFont, Theme: terminalLight, DarkTheme: terminalDark})
+	if p.sess == nil {
+		term, err := newConfiguredTerminal(terminal.Options{Conn: nopConn{}, Transparent: true, CopyOnSelect: terminalCopyOnSelect(prefs.CopyOnSelect), OnCopy: a.terminalCopied, OnZoom: a.terminalZoom, Font: termFont, Theme: terminalLight, DarkTheme: terminalDark})
 		if err == nil {
 			term.Feed([]byte("\x1b[31mCould not start a session: " + a.err + "\x1b[0m\r\n"))
 			p.term = term
 		}
 		return
 	}
-	p.stream = a.client.Stream(p.SID, cols, rows)
-	p.stream.OnData = func(int) { p.lastData.Store(time.Now().UnixNano()) }
 	// The terminal's callbacks change the state on the main thread, in
 	// the window that made the pane, as long as it is open.
-	win := a.win
-	update := func(fn func()) {
-		if win != nil {
-			win.Update(fn)
-		} else {
-			a.post(fn)
-		}
-	}
-	term, err := terminal.New(terminal.Options{
-		Conn:            p.stream,
-		Font:            termFont,
-		Theme:           terminalLight,
-		DarkTheme:       terminalDark,
-		Transparent:     true,
-		CopyOnSelect:    prefs.CopyOnSelect,
-		OnCopySelection: a.selectionCopied,
+	term, err := newConfiguredTerminal(terminal.Options{
+		Conn:         paneConn{Session: p.sess, p: p},
+		Font:         termFont,
+		Theme:        terminalLight,
+		DarkTheme:    terminalDark,
+		Transparent:  true,
+		CopyOnSelect: terminalCopyOnSelect(prefs.CopyOnSelect),
+		OnCopy:       a.terminalCopied,
+		OnZoom:       a.terminalZoom,
+		OpenLink:     func(link string) bool { return a.openTerminalLink(p, link) },
+		OnDrop:       func(paths []string) bool { return a.terminalDrop(p, paths) },
+		OnPaste:      func(d transfer.Data) bool { return a.terminalPaste(p, d) },
 		OnTitle: func(title string) {
-			update(func() { p.title = title })
+			a.onUI(func() { p.title = title })
 		},
 		OnBell: func() {
-			update(func() { a.ring(p) })
+			a.onUI(func() { a.ring(p) })
 		},
 		OnNotify: func(title, body string) {
 			if title == "" {
@@ -319,10 +325,10 @@ func (a *App) attach(p *Pane, cols, rows int) {
 			mygo.NewNotification(mygo.NotificationOptions{Title: title, Body: body}).Show()
 			// A program that asks for a notification asks for the user
 			// too, as an agent waiting for an answer does.
-			update(func() { a.ring(p) })
+			a.onUI(func() { a.ring(p) })
 		},
 		OnExit: func(int) {
-			update(func() {
+			a.onUI(func() {
 				if !p.closed && !a.quitting {
 					a.closePane(p)
 				}
@@ -332,12 +338,56 @@ func (a *App) attach(p *Pane, cols, rows int) {
 	if err != nil {
 		log.Printf("terminal: %v", err)
 		a.err = err.Error()
+		p.sess.Close()
 		return
 	}
-	// Until a view shows it, the terminal has the session's size, so that
-	// attaching changes nothing in the session.
+	// Until a view shows it, the terminal has the session's size.
 	term.Resize(cols, rows)
 	p.term = term
+	go a.watch(p)
+}
+
+// onUI changes the state on the main thread, in the window that made the
+// pane, or in the next frame of a view without a window, as in tests.
+func (a *App) onUI(fn func()) {
+	if win := a.win; win != nil {
+		win.Update(fn)
+	} else {
+		a.post(fn)
+	}
+}
+
+// paneConn is the terminal's connection to its pane's session: it notes
+// when the session printed, for the activity dot.
+type paneConn struct {
+	*session.Session
+	p *Pane
+}
+
+func (c paneConn) Read(b []byte) (int, error) {
+	n, err := c.Session.Read(b)
+	if n > 0 {
+		c.p.lastData.Store(time.Now().UnixNano())
+	}
+	return n, err
+}
+
+// watch asks the session what runs in it, every half second, until the
+// pane closes.
+func (a *App) watch(p *Pane) {
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
+	for range tick.C {
+		if p.closed || p.sess == nil {
+			return
+		}
+		in := p.sess.Info()
+		a.onUI(func() {
+			if !p.closed {
+				a.apply(p, in)
+			}
+		})
+	}
 }
 
 // nopConn is the Conn of a terminal that only shows what the app feeds it.
@@ -447,7 +497,7 @@ func (a *App) split(vertical bool) {
 			cols = max(cols/2, 10)
 		}
 	}
-	p := a.newPaneWithProfile(a.splitDirectory(old), cols, rows, old.profile)
+	p := a.newPaneWithProfile(old.splitDirectory(), cols, rows, old.profile)
 	p.Tab = t
 	left := &Node{ID: a.id(), Pane: old, Parent: n}
 	right := &Node{ID: a.id(), Pane: p, Parent: n}
@@ -477,9 +527,8 @@ func (a *App) closePane(p *Pane) {
 	if p.term != nil {
 		p.term.Close()
 	}
-	if sid := p.SID; sid != "" {
-		c := a.client
-		go c.Kill(sid)
+	if p.sess != nil {
+		p.sess.Close()
 	}
 	t := p.Tab
 	if t.Zoom == p {
@@ -562,8 +611,8 @@ func (a *App) closeTab(t *Tab) {
 		if p.term != nil {
 			p.term.Close()
 		}
-		if p.SID != "" {
-			go a.client.Kill(p.SID)
+		if p.sess != nil {
+			p.sess.Close()
 		}
 	}
 	a.removeTab(t)
@@ -745,7 +794,7 @@ func (p *Pane) label() (name, detail string) {
 
 // titleOfShell tells a title a shell set, naming the program or the
 // directory, from one a program set of its own.
-func titleOfShell(title string, in rex.SessionInfo) bool {
+func titleOfShell(title string, in session.Info) bool {
 	l := strings.ToLower(title)
 	for _, w := range []string{strings.ToLower(in.Program), strings.ToLower(in.Shell)} {
 		// Windows's consoles title themselves with the shell's file:
@@ -819,8 +868,8 @@ func (t *Tab) label() (name, detail string) {
 	return t.Focus.label()
 }
 
-// The saved layout: the tabs, their splits and the sessions of their
-// panes, which the server keeps, and the app restores when it starts.
+// The saved layout: the tabs, their splits and where their panes work,
+// which the app keeps and restores when it starts, with new shells.
 type savedLayout struct {
 	Active int        `json:"active"`
 	Tabs   []savedTab `json:"tabs"`
@@ -834,7 +883,6 @@ type savedTab struct {
 }
 
 type savedNode struct {
-	SID      string          `json:"sid,omitempty"`
 	Profile  terminalProfile `json:"profile,omitzero"`
 	Dir      string          `json:"dir,omitempty"`
 	Cols     int             `json:"cols,omitempty"`
@@ -850,7 +898,7 @@ func (a *App) snapshot() savedLayout {
 	var save func(n *Node) *savedNode
 	save = func(n *Node) *savedNode {
 		if p := n.Pane; p != nil {
-			s := &savedNode{SID: p.SID, Dir: p.directory(), Profile: p.profile}
+			s := &savedNode{Dir: p.directory(), Profile: p.profile}
 			if p.term != nil {
 				s.Cols, s.Rows = p.term.Size()
 			}
@@ -875,26 +923,44 @@ func (a *App) snapshot() savedLayout {
 // changed notes that the layout changed, to save it soon.
 func (a *App) changed() { a.saveDue = true }
 
-// save sends the layout to the server, which keeps it on disk.
+// layoutPath is where the layout is kept, in the app's data directory.
+func (a *App) layoutPath() string { return filepath.Join(appdir.Dir(), "layout.json") }
+
+// save keeps the layout on disk, once per second at most.
 func (a *App) save() {
 	a.saveDue = false
-	if a.client == nil {
-		return
-	}
 	b, err := json.Marshal(a.snapshot())
 	if err != nil || string(b) == a.lastSnapshot {
 		return
 	}
-	a.lastSnapshot = string(b)
 	a.lastSave = time.Now()
-	c := a.client
-	go c.SetLayout(b)
+	a.writeLayout(b)
 }
 
-// restore opens the tabs of the saved layout, attaching to the sessions
-// the server still has and starting new ones in place of those it lost.
+// writeLayout writes the layout to its file, atomically: a reader never
+// sees half of it.
+func (a *App) writeLayout(b []byte) {
+	a.layoutMu.Lock()
+	defer a.layoutMu.Unlock()
+	path := a.layoutPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return
+	}
+	a.lastSnapshot = string(b)
+}
+
+// restore opens the tabs of the saved layout, with a new shell in the
+// directory of each pane.
 func (a *App) restore() bool {
-	raw, err := a.client.Layout()
+	raw, err := os.ReadFile(a.layoutPath())
 	if err != nil || len(raw) == 0 {
 		return false
 	}
@@ -902,32 +968,16 @@ func (a *App) restore() bool {
 	if json.Unmarshal(raw, &l) != nil || len(l.Tabs) == 0 {
 		return false
 	}
-	live := map[string]rex.SessionInfo{}
-	if infos, err := a.client.List(); err == nil {
-		for _, in := range infos {
-			if !in.Exited {
-				live[in.ID] = in
-			}
-		}
-	}
-	used := map[string]bool{}
 	var load func(s *savedNode, t *Tab, parent *Node) *Node
 	load = func(s *savedNode, t *Tab, parent *Node) *Node {
 		n := &Node{ID: a.id(), Parent: parent}
 		if s.A == nil || s.B == nil {
-			var p *Pane
-			if in, ok := live[s.SID]; ok && !used[s.SID] {
-				used[s.SID] = true
-				p = &Pane{ID: a.id(), SID: s.SID, info: in, startDir: s.Profile.startingDir(s.Dir), profile: s.Profile}
-				a.attach(p, in.Cols, in.Rows)
-			} else {
-				dir := s.Profile.startingDir(s.Dir)
-				if st, err := os.Stat(dir); !s.Profile.WSL && (err != nil || !st.IsDir()) {
-					dir, _ = os.UserHomeDir()
-				}
-				p = a.newPaneWithProfile(dir, s.Cols, s.Rows, s.Profile)
-				p.restored = true
+			dir := s.Profile.startingDir(s.Dir)
+			if st, err := os.Stat(dir); !s.Profile.WSL && (err != nil || !st.IsDir()) {
+				dir, _ = os.UserHomeDir()
 			}
+			p := a.newPaneWithProfile(dir, s.Cols, s.Rows, s.Profile)
+			p.restored = true
 			p.Tab, p.Node = t, n
 			n.Pane = p
 			return n
@@ -952,20 +1002,6 @@ func (a *App) restore() bool {
 		}
 		a.tabs = append(a.tabs, t)
 	}
-	// Sessions no tab shows, as those of another window that crashed,
-	// get a tab of their own rather than running unseen.
-	for _, in := range sortedInfos(live) {
-		if used[in.ID] {
-			continue
-		}
-		t := &Tab{ID: a.id()}
-		p := &Pane{ID: a.id(), SID: in.ID, info: in, startDir: in.Dir}
-		a.attach(p, in.Cols, in.Rows)
-		t.Root = &Node{ID: a.id(), Pane: p}
-		p.Tab, p.Node = t, t.Root
-		t.setFocus(p)
-		a.tabs = append(a.tabs, t)
-	}
 	if len(a.tabs) == 0 {
 		return false
 	}
@@ -974,77 +1010,28 @@ func (a *App) restore() bool {
 	return true
 }
 
-func sortedInfos(m map[string]rex.SessionInfo) []rex.SessionInfo {
-	out := make([]rex.SessionInfo, 0, len(m))
-	for _, in := range m {
-		out = append(out, in)
-	}
-	slices.SortFunc(out, func(a, b rex.SessionInfo) int { return a.Created.Compare(b.Created) })
-	return out
-}
-
-// poll asks the server what runs in each session, every half second,
-// until the window closes.
-func (a *App) poll(win *mygo.Window, client *rex.Client) {
-	tick := time.NewTicker(500 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		select {
-		case <-client.Closed():
-			win.Update(func() {
-				if !a.quitting {
-					a.err = "Lost the connection to the session server."
-				}
+// apply takes what a session said of itself.
+func (a *App) apply(p *Pane, in session.Info) {
+	was := p.info
+	p.info = in
+	// A program that ran a while and finished out of sight asks for
+	// attention.
+	if !was.Idle && was.Program != "" && in.Idle && was.Program != in.Program {
+		seen := a.tab() == p.Tab && p.Tab != nil && p.Tab.Focus == p && a.focusedWin
+		if !seen {
+			a.wantAttention(p)
+		}
+		if !a.focusedWin && time.Since(was.LastInput) > 8*time.Second {
+			prog := programOf(was.Program)
+			n := mygo.NewNotification(mygo.NotificationOptions{
+				Title: prog.Name + " finished",
+				Body:  "in " + shortDir(in.Dir),
 			})
-			return
-		case <-tick.C:
+			n.Show()
 		}
-		infos, err := client.List()
-		if err != nil {
-			continue
-		}
-		byID := make(map[string]rex.SessionInfo, len(infos))
-		for _, in := range infos {
-			byID[in.ID] = in
-		}
-		win.Update(func() {
-			if a.win == win {
-				a.apply(byID)
-			}
-		})
 	}
-}
-
-// apply takes what the server said of the sessions.
-func (a *App) apply(byID map[string]rex.SessionInfo) {
-	for ti, t := range a.tabs {
-		for _, p := range t.panes() {
-			in, ok := byID[p.SID]
-			if !ok {
-				continue
-			}
-			was := p.info
-			p.info = in
-			// A program that ran a while and finished out of sight
-			// asks for attention.
-			if !was.Idle && was.Program != "" && in.Idle && was.Program != in.Program {
-				seen := ti == a.active && t.Focus == p && a.focusedWin
-				if !seen {
-					a.wantAttention(p)
-				}
-				if !a.focusedWin && time.Since(was.LastInput) > 8*time.Second {
-					prog := programOf(was.Program)
-					n := mygo.NewNotification(mygo.NotificationOptions{
-						Title: prog.Name + " finished",
-						Body:  "in " + shortDir(in.Dir),
-					})
-					n.Show()
-				}
-			}
-			if was.Dir != in.Dir {
-				a.changed()
-			}
-		}
+	if was.Dir != in.Dir {
+		a.changed()
 	}
 	if a.saveDue && time.Since(a.lastSave) > time.Second {
 		a.save()

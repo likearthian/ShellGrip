@@ -10,10 +10,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -50,24 +50,30 @@ const (
 )
 
 type filePreview struct {
-	path string
+	remoteStamp    previewFileStamp
+	remoteDigest   [32]byte
+	remoteAgain    bool
+	fileStamp      previewFileStamp
+	nextFileCheck  time.Time
+	checkingFile   bool
+	reloadRevision int
+	reloadBusy     bool
+	reloadAgain    bool
+	path           string
 	// source names where a cached preview came from, when path is a copy:
 	// a remote file downloaded for it.
-	source                   string
-	pane                     *Pane
-	loading                  bool
-	diff                     bool
-	subtitle                 string
-	diffWidth                float32
-	diffScroll               [2]ui.ScrollState
-	diffHorizontal           [2]ui.ScrollState
-	diffScrollX, diffScrollY float32
-	diffChange               int
-	diffDisplay              *diffDisplay
-	content                  previewContent
-	markdown                 ui.ListState
-	initialized              bool
-	scroll                   ui.ScrollState
+	source      string
+	pane        *Pane
+	loading     bool
+	diff        bool
+	subtitle    string
+	diffBar     bool
+	diffChange  int
+	diffDisplay *editor.DiffState
+	content     previewContent
+	markdown    ui.ListState
+	initialized bool
+	scroll      ui.ScrollState
 	// codeBox and gutterBox pin the syntax text and its line numbers to the
 	// size they took when the preview first laid them out. The text system
 	// caches a layout only while it fits its budget, so the larger files of
@@ -106,7 +112,7 @@ type previewContent struct {
 	lexer      chroma.Lexer
 	ranges     [2][]ui.TextRange
 	diffLines  []diffLine
-	diffRows   []diffRow
+	diffPatch  *editor.FilePatch
 }
 
 // diffLine is one line of a unified diff and what it does.
@@ -114,33 +120,6 @@ type diffLine struct {
 	text string
 	kind byte
 }
-
-// diffRow is one aligned row of a side-by-side diff.
-type diffRow struct {
-	left, right diffCell
-	marker      string
-	separator   bool
-}
-
-// diffCell is one side of a row: its line number and text, when present.
-type diffCell struct {
-	number                 int
-	text                   string
-	kind                   byte
-	present                bool
-	spans                  [2][]ui.Span
-	changeStart, changeEnd int
-}
-
-const (
-	diffLineHeight   = 21
-	diffGutterWidth  = 60
-	diffMarkerWidth  = 18
-	diffMinCodeWidth = 260
-	// Indexed buffers keep large diffs side by side without building every row.
-	maxSideBySideRows = 20000
-	maxDiffSyntaxRows = 2000
-)
 
 func (a *App) openFilePreview(c *ui.Context, p *Pane, path string) {
 	a.showPreview(p, path, "")
@@ -153,20 +132,54 @@ func (a *App) openFilePreview(c *ui.Context, p *Pane, path string) {
 
 // showPreview opens path in the tab's preview, naming source when path is
 // a cache of a remote file.
-func (a *App) showPreview(p *Pane, path, source string) {
+func (a *App) showPreview(p *Pane, path, source string, places ...terminalFilePlace) {
 	t := a.tab()
+	if len(places) > 0 && p.Tab != nil {
+		t = p.Tab
+	}
 	if t == nil || t.Settings {
 		return
 	}
 	preview := &filePreview{path: path, source: source, pane: p, loading: true}
 	t.preview = preview
 	a.focusReq = nil
+	a.loadFilePreview(t, preview, places...)
+}
+
+func (a *App) loadFilePreview(t *Tab, preview *filePreview, places ...terminalFilePlace) {
+	if preview.reloadBusy {
+		preview.reloadAgain = true
+		return
+	}
+	preview.reloadBusy = true
+	preview.reloadRevision++
+	revision := preview.reloadRevision
 	go func() {
-		content := loadPreview(path)
+		defer func() {
+			a.post(func() {
+				preview.reloadBusy = false
+				if preview.reloadAgain {
+					preview.reloadAgain = false
+					if t.preview == preview && !a.quitting && !a.exiting.Load() {
+						a.loadFilePreview(t, preview)
+					}
+				}
+			})
+			a.invalidate()
+		}()
+		stamp := statPreviewFile(preview.path)
+		content := loadPreview(preview.path)
 		initial := content
 		a.post(func() {
-			if t.preview == preview {
+			if t.preview == preview && preview.reloadRevision == revision {
 				preview.content, preview.loading = initial, false
+				preview.fileStamp = stamp
+				preview.initialized = false
+				preview.codeBox, preview.gutterBox = ui.Rect{}, ui.Rect{}
+				if len(places) > 0 && places[0].line > 0 {
+					line := min(places[0].line, strings.Count(string(initial.source), "\n")+1)
+					preview.scroll.Y = float32(max(0, line-3)) * 21
+				}
 			}
 		})
 		a.invalidate()
@@ -174,7 +187,7 @@ func (a *App) showPreview(p *Pane, path, source string) {
 			content.highlightLargeText()
 			ranges := content.ranges
 			a.post(func() {
-				if t.preview == preview {
+				if t.preview == preview && preview.reloadRevision == revision {
 					preview.content.ranges = ranges
 				}
 			})
@@ -442,139 +455,13 @@ func loadDiff(p *Pane, repo *gitRepo, file gitFile, staged bool) previewContent 
 	for _, line := range lines {
 		content.diffLines = append(content.diffLines, diffLine{text: line, kind: diffLineKind(line)})
 	}
-	content.diffRows = parseDiffRows(text)
-	if lexer := lexers.Match(filepath.Base(file.Path)); lexer != nil && len(content.diffRows) <= maxDiffSyntaxRows {
-		for i := range content.diffRows {
-			for _, cell := range []*diffCell{&content.diffRows[i].left, &content.diffRows[i].right} {
-				if !cell.present || cell.text == "" {
-					continue
-				}
-				tokens := previewTokens(cell.text, lexer)
-				if len(tokens) == 0 {
-					continue
-				}
-				for theme := range cell.spans {
-					cell.spans[theme] = previewCodeSpans(tokens[0], theme == 1)
-				}
-			}
-		}
+	// Keep Git's hunks rather than comparing the texts again in the viewer.
+	patches, err := editor.ParsePatch(string(out))
+	if err == nil && len(patches) == 1 && !patches[0].Binary && len(patches[0].Hunks) > 0 {
+		content.diffPatch = &patches[0]
 	}
+
 	return content
-}
-
-var diffHunkPattern = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
-
-// parseDiffRows aligns a unified diff into rows with both sides, pairing
-// each block of removals with the additions that replace it.
-func parseDiffRows(text string) []diffRow {
-	lines := strings.Split(text, "\n")
-	var rows []diffRow
-	leftNo, rightNo := 0, 0
-	prevLeftEnd, prevRightEnd := 0, 0
-	inHunk := false
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		if match := diffHunkPattern.FindStringSubmatch(line); match != nil {
-			leftStart, leftCount := diffRange(match[1], match[2])
-			rightStart, rightCount := diffRange(match[3], match[4])
-			if !inHunk {
-				if leftStart > 1 || rightStart > 1 {
-					rows = append(rows, diffRow{separator: true, marker: "⋯"})
-				}
-			} else if leftStart > prevLeftEnd+1 || rightStart > prevRightEnd+1 {
-				rows = append(rows, diffRow{separator: true, marker: "⋯"})
-			}
-			leftNo, rightNo = leftStart, rightStart
-			prevLeftEnd, prevRightEnd = leftStart+leftCount-1, rightStart+rightCount-1
-			inHunk = true
-			continue
-		}
-		if strings.HasPrefix(line, "diff --git") {
-			inHunk = false
-			continue
-		}
-		if !inHunk {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(line, "\\"):
-			// "\ No newline at end of file" belongs to the line before it.
-		case strings.HasPrefix(line, " "):
-			text := diffText(line[1:])
-			rows = append(rows, diffRow{
-				left:  diffCell{number: leftNo, text: text, kind: ' ', present: true},
-				right: diffCell{number: rightNo, text: text, kind: ' ', present: true},
-			})
-			leftNo++
-			rightNo++
-		case strings.HasPrefix(line, "-"), strings.HasPrefix(line, "+"):
-			var removed, added []string
-			for i < len(lines) && (strings.HasPrefix(lines[i], "-") || strings.HasPrefix(lines[i], "+")) {
-				if strings.HasPrefix(lines[i], "-") {
-					removed = append(removed, lines[i][1:])
-				} else {
-					added = append(added, lines[i][1:])
-				}
-				i++
-			}
-			i--
-			for j := 0; j < max(len(removed), len(added)); j++ {
-				row := diffRow{}
-				if j < len(removed) {
-					row.left = diffCell{number: leftNo, text: diffText(removed[j]), kind: '-', present: true}
-					leftNo++
-				}
-				if j < len(added) {
-					row.right = diffCell{number: rightNo, text: diffText(added[j]), kind: '+', present: true}
-					rightNo++
-				}
-				switch {
-				case row.left.present && row.right.present:
-					row.marker = "→"
-				case row.right.present:
-					row.marker = "+"
-				case row.left.present:
-					row.marker = "−"
-				}
-				rows = append(rows, row)
-			}
-		}
-	}
-	for i := range rows {
-		row := &rows[i]
-		if row.left.kind == '-' && row.right.kind == '+' {
-			left, right := []rune(row.left.text), []rune(row.right.text)
-			start := 0
-			for start < min(len(left), len(right)) && left[start] == right[start] {
-				start++
-			}
-			endLeft, endRight := len(left), len(right)
-			for endLeft > start && endRight > start && left[endLeft-1] == right[endRight-1] {
-				endLeft--
-				endRight--
-			}
-			row.left.changeStart, row.left.changeEnd = start, endLeft
-			row.right.changeStart, row.right.changeEnd = start, endRight
-		}
-	}
-	return rows
-}
-
-// diffText expands tabs as the file preview does, so both sides align.
-func diffText(text string) string {
-	text = strings.TrimSuffix(text, "\r")
-	column := 0
-	return previewExpandTabs(text, &column)
-}
-
-// diffRange reads a hunk header's start and count, which defaults to 1.
-func diffRange(start, count string) (int, int) {
-	at, _ := strconv.Atoi(start)
-	if count == "" {
-		return at, 1
-	}
-	n, _ := strconv.Atoi(count)
-	return at, n
 }
 
 // diffLineKind tells a diff line's role from its first characters.
@@ -761,7 +648,7 @@ func (content *previewContent) highlightLargeText() {
 // one column, which lets Select All take all of it.
 func (a *App) markdownPreview(c *ui.Context, k *colors, p *filePreview) {
 	if len(p.content.blocks) <= maxRichMarkdownBlocks {
-		ui.Scroll(c).Grow(1).MinHeight(0).Padding(24).Children(func() {
+		ui.Scroll(c).TrackScroll(&p.scroll).Grow(1).MinHeight(0).Padding(24).Children(func() {
 			ui.Column(c).Gap(10).MinWidth(0).Selectable().Children(func() {
 				previewMarkdown(c, k, &p.content, p.content.document)
 			})
@@ -907,7 +794,7 @@ func (a *App) filePreviewPanel(c *ui.Context, k *colors, t *Tab) {
 	if p.source != "" {
 		name, source = path.Base(p.source), p.source
 	}
-	if !a.paletteOpen && a.renaming == nil && c.Shortcut(0, ui.KeyEscape) {
+	if !a.paletteOpen && a.renaming == nil && !p.diffBar && c.Shortcut(0, ui.KeyEscape) {
 		a.later(c, func() { a.closeFilePreview(t) })
 	}
 	ui.Column(c.Key(fmt.Sprintf("file-preview-%p", p))).Grow(1).MinHeight(0).MinWidth(0).Radius(cardR).Clip().
@@ -925,9 +812,6 @@ func (a *App) filePreviewPanel(c *ui.Context, k *colors, t *Tab) {
 			}
 			if p.diff {
 				label = p.subtitle
-				if len(p.content.diffRows) > maxSideBySideRows {
-					label += " · unified"
-				}
 			} else if p.content.language != "" {
 				label += " · " + p.content.language
 			}
@@ -962,7 +846,7 @@ func (a *App) filePreviewPanel(c *ui.Context, k *colors, t *Tab) {
 			if c.Theme().Dark {
 				theme = 1
 			}
-			ui.ScrollBoth(c).Grow(1).MinHeight(0).MinWidth(0).Padding(12, 14).Children(func() {
+			ui.ScrollBoth(c).TrackScroll(&p.scroll).Grow(1).MinHeight(0).MinWidth(0).Padding(12, 14).Children(func() {
 				ui.Row(c).Gap(14).AlignItems(ui.Start).Children(func() {
 					gutter := ui.Text(c, p.content.gutter).MinWidth(44).Shrink(0).Font(defaultFontFamily).
 						FontSize(12).FixedLineHeight(21).TextColor(k.textFaint).NoWrap().Unselectable()
@@ -974,7 +858,7 @@ func (a *App) filePreviewPanel(c *ui.Context, k *colors, t *Tab) {
 				})
 			})
 		case "diff":
-			if len(p.content.diffRows) > 0 && len(p.content.diffRows) <= maxSideBySideRows {
+			if p.content.diffPatch != nil {
 				a.sideBySideDiff(c, k, p, c.Theme().Dark)
 				return
 			}

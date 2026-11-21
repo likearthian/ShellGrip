@@ -16,7 +16,9 @@ func (p *Pane) directory() string {
 	return p.startDir
 }
 
-func (a *App) splitDirectory(p *Pane) string {
+// splitDirectory returns the directory a split of the pane opens in: what
+// the shell last reported, or the one its program works in now.
+func (p *Pane) splitDirectory() string {
 	if dir := p.reportedDirectory(); dir != "" {
 		return dir
 	}
@@ -25,15 +27,10 @@ func (a *App) splitDirectory(p *Pane) string {
 			p.startDir = dir
 			return dir
 		}
-	} else if a.client != nil {
-		// Refresh now rather than waiting for the next activity poll after cd.
-		if sessions, err := a.client.List(); err == nil {
-			for _, info := range sessions {
-				if info.ID == p.SID && info.Dir != "" {
-					p.info = info
-					return info.Dir
-				}
-			}
+	} else if p.sess != nil {
+		// Read now rather than waiting for the next half-second look.
+		if dir := p.sess.Info().Dir; dir != "" {
+			return dir
 		}
 	}
 	return p.directory()

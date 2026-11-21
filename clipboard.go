@@ -5,8 +5,34 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gorex/internal/terminal"
+
 	"github.com/egoist/mygo/ui"
 )
+
+func terminalCopyOnSelect(enabled bool) terminal.CopyOnSelect {
+	if enabled {
+		return terminal.CopyOnSelectClipboard
+	}
+	return terminal.CopyOnSelectNone
+}
+
+func (a *App) terminalCopied(text string, source terminal.CopySource) {
+	if source != terminal.CopyProgram {
+		a.selectionCopied(text)
+	}
+}
+
+// terminalZoom keeps wheel zoom and terminal keybindings in step with the
+// saved font size of every pane, as the app's text-size commands do.
+func (a *App) terminalZoom(z terminal.Zoom) bool {
+	if z.Reset {
+		a.setFontSize(defaultFontSize)
+	} else {
+		a.setFontSize(termFont.Size + float32(z.Steps))
+	}
+	return true
+}
 
 func (a *App) selectionCopied(text string) {
 	if !a.quitting && text != "" {

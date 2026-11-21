@@ -11,10 +11,13 @@ import (
 //go:embed assets/icons/*.svg assets/brands/*.svg
 var assets embed.FS
 
+//go:embed resources/icon.png
+var appIcon []byte
+
 var svgs = map[string]*ui.SVG{}
 
 var appLogo = func() ui.ImageSource {
-	image, err := ui.DecodeBitmap(trayIcon)
+	image, err := ui.DecodeBitmap(appIcon)
 	if err != nil {
 		panic(err)
 	}

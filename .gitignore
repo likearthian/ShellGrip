@@ -1,3 +1,5 @@
 /build/
 /.mygo/
+/resources/windows/wslwatch/
+/resources/wslwatch/
 mygo_windows_*.syso

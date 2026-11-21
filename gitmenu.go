@@ -549,6 +549,7 @@ func (a *App) gitAuthDialog(c *ui.Context, k *colors) {
 			auth.error = ""
 		}
 		submit := user.Submitted() || password.Submitted()
+		ui.Checkbox(c, &auth.remember, "Remember in keychain")
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "Cancel").Clicked() {
 				a.closeGitAuth()

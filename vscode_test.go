@@ -50,13 +50,7 @@ func TestPaneVSCodeButtonUsesCurrentDirectory(t *testing.T) {
 	}
 	p.term.Send([]byte(command))
 	waitFor(t, tt, "shell directory change", func() bool {
-		sessions, _ := a.client.List()
-		for _, session := range sessions {
-			if session.ID == sid && samePath(session.Dir, dir) {
-				return true
-			}
-		}
-		return false
+		return p.sess != nil && samePath(p.sess.Info().Dir, dir)
 	})
 	// The click must refresh directory information, even before the next poll.
 	p.info.Dir = os.TempDir()
