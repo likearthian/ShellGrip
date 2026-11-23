@@ -253,7 +253,9 @@ func (a *App) fileTreeDivider(c *ui.Context, k *colors, width, available float32
 func (a *App) fileTreePanel(c *ui.Context, k *colors, p *Pane, width float32) {
 	k = sidebarColors(c, k)
 	s := a.refreshFileTree(c, p)
-	c.After(a.treePollInterval(p))
+	if a.focusedWin {
+		c.After(a.treePollInterval(p))
+	}
 	selectedPath := s.selected
 	if selectedPath == "" {
 		selectedPath = s.root

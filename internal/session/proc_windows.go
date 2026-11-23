@@ -141,7 +141,7 @@ var procTreeCache struct {
 func processTree() procTree {
 	procTreeCache.Lock()
 	defer procTreeCache.Unlock()
-	if time.Since(procTreeCache.at) < 100*time.Millisecond {
+	if time.Since(procTreeCache.at) < 450*time.Millisecond {
 		return procTreeCache.tree
 	}
 	t := procTree{children: map[uint32][]uint32{}, name: map[uint32]string{}}

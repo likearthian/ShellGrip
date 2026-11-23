@@ -133,7 +133,7 @@ func (a *App) gitHistoryFor(c *ui.Context, p *Pane, repo *gitRepo) *gitHistory {
 	}
 	entry.used = now
 	fresh := !entry.checked.IsZero() && now.Sub(entry.checked) < 10*time.Second
-	start := !fresh && !entry.loading
+	start := !fresh && !entry.loading && (a.focusedWin || a.win == nil)
 	if start {
 		entry.loading = true
 	}
@@ -214,7 +214,7 @@ func (a *App) gitFor(c *ui.Context, p *Pane) *gitRepo {
 	// A directory outside a repository costs only a walk up its parents,
 	// and that answer is cached too, as repositories appear and go.
 	fresh := !entry.checked.IsZero() && now.Sub(entry.checked) < ttl
-	start := !fresh && !entry.loading
+	start := !fresh && !entry.loading && (a.focusedWin || a.win == nil)
 	if start {
 		entry.loading = true
 	}
@@ -317,6 +317,9 @@ func findGitRoot(dir string) string {
 
 // gitOutput runs git in dir and returns its standard output.
 func gitOutput(p *Pane, dir string, args ...string) ([]byte, error) {
+	// status may refresh the index and create index.lock. A directory watch
+	// would see that write and ask for status again, even in the background.
+	args = append([]string{"--no-optional-locks"}, args...)
 	exe, full := gitInvocation(p, dir, args...)
 	timeout := 4 * time.Second
 	if p.profile.WSL {

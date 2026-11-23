@@ -124,9 +124,15 @@ func (a *App) open() {
 	}()
 	// The file trees read when the window is back, and keep quiet while it
 	// is in the background.
-	win.OnFocus(func() { a.refreshTrees() })
+	win.OnFocus(func() {
+		a.setBackground(false)
+		a.refreshTrees()
+	})
 	win.OnShow(func() { a.refreshTrees() })
-	win.OnBlur(func() { a.focusedWin = false })
+	win.OnBlur(func() {
+		a.focusedWin = false
+		a.setBackground(true)
+	})
 	if !a.restore() {
 		home, _ := os.UserHomeDir()
 		a.newTab(home)

@@ -109,8 +109,9 @@ func (a *App) fileWatchDirectory(p *Pane) string {
 	return ""
 }
 
-// keep watches only for the active folder and file previews. WSL watches and
-// metadata polling pause for inactive tabs/windows to avoid idle UNC traffic.
+// keep watches only for the active folder and file previews. Watches and
+// metadata polling pause for unfocused windows; WSL previews also pause in
+// inactive tabs to avoid idle UNC traffic.
 // Native watches never follow SSH caches.
 func (a *App) syncFileWatches(c *ui.Context) {
 	if a.quitting || a.exiting.Load() {
@@ -118,7 +119,7 @@ func (a *App) syncFileWatches(c *ui.Context) {
 		return
 	}
 	wanted := map[string]*localFileWatch{}
-	if t := a.tab(); t != nil && !t.Settings && localWatchPane(t.Focus) && (!t.Focus.profile.WSL || a.focusedWin) {
+	if t := a.tab(); t != nil && !t.Settings && localWatchPane(t.Focus) && a.focusedWin {
 		if dir := a.fileWatchDirectory(t.Focus); dir != "" {
 			wanted["dir:"+dir] = &localFileWatch{path: dir, wsl: t.Focus.profile.WSL, gitDir: t.Focus.directory()}
 		}
@@ -128,7 +129,7 @@ func (a *App) syncFileWatches(c *ui.Context) {
 		if p == nil || p.diff || p.source != "" || !localWatchPane(p.pane) {
 			continue
 		}
-		if p.pane.profile.WSL && (t != a.tab() || !a.focusedWin) {
+		if !a.focusedWin || p.pane.profile.WSL && t != a.tab() {
 			continue
 		}
 		if name := fileWatchPath(p.pane, p.path); name != "" {

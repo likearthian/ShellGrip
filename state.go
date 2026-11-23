@@ -73,6 +73,7 @@ type Pane struct {
 	bounds    ui.Rect
 	closed    bool
 	stopWatch chan struct{}
+	wakeWatch chan struct{}
 	stopOnce  sync.Once
 	// restored tells that the session was made anew for a pane of a
 	// saved layout whose session was gone.
@@ -157,6 +158,7 @@ type App struct {
 	confirming bool
 	askQuit    func(summary string) bool
 	focusedWin bool
+	background atomic.Bool
 	// cueOn tells that the window itself asks for the user: its taskbar
 	// button flashes, or its Dock icon bounces, while a pane waits.
 	cueOn               bool
@@ -349,6 +351,7 @@ func (a *App) attach(p *Pane, cols, rows int) {
 	term.Resize(cols, rows)
 	p.term = term
 	p.stopWatch = make(chan struct{})
+	p.wakeWatch = make(chan struct{}, 1)
 	go a.watch(p, p.stopWatch)
 }
 
@@ -386,28 +389,82 @@ func (c paneConn) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// watch asks the session what runs in it, every half second, until the
-// pane closes.
+// watch asks the session what runs in it until the pane closes, backing off
+// while the shell sits idle and waking the UI only when the info changes.
 func (a *App) watch(p *Pane, stop <-chan struct{}) {
 	sess := p.sess
 	if sess == nil {
 		return
 	}
-	tick := time.NewTicker(500 * time.Millisecond)
-	defer tick.Stop()
+	var prev session.Info
+	var havePrev bool
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
 	for {
 		select {
 		case <-stop:
 			return
-		case <-tick.C:
-			in := sess.Info()
+		case <-timer.C:
+		case <-p.wakeWatch:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		}
+		in := sess.Info()
+		if !havePrev || !infoEqual(prev, in) {
+			prev, havePrev = in, true
 			a.onUI(func() {
 				if !p.closed {
 					a.apply(p, in)
 				}
 			})
 		}
+		timer.Reset(sessionPollInterval(in, time.Unix(0, p.lastData.Load()), a.background.Load(), time.Now()))
 	}
+}
+
+// quiet background panes include wrappers such as wsl.exe, whose foreground
+// process stays alive even while the shell inside it sits at a prompt.
+func sessionPollInterval(in session.Info, lastData time.Time, background bool, now time.Time) time.Duration {
+	if now.Sub(lastData) > 2*time.Second && now.Sub(in.LastInput) > 2*time.Second {
+		if background {
+			return 10 * time.Second
+		}
+		if in.Idle {
+			return 1500 * time.Millisecond
+		}
+	}
+	return 500 * time.Millisecond
+}
+
+// setBackground wakes the session watchers on focus changes so foreground
+// metadata refreshes immediately and idle background shells can poll less often.
+func (a *App) setBackground(background bool) {
+	a.background.Store(background)
+	for _, t := range a.tabs {
+		for _, p := range t.panes() {
+			select {
+			case p.wakeWatch <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+func infoEqual(a, b session.Info) bool {
+	return a.ID == b.ID &&
+		a.PID == b.PID &&
+		a.Shell == b.Shell &&
+		a.Program == b.Program &&
+		a.Idle == b.Idle &&
+		a.Dir == b.Dir &&
+		a.Exited == b.Exited &&
+		a.ExitCode == b.ExitCode &&
+		a.LastInput.Equal(b.LastInput) &&
+		slices.Equal(a.Args, b.Args)
 }
 
 // nopConn is the Conn of a terminal that only shows what the app feeds it.
@@ -535,6 +592,12 @@ func (a *App) closePane(p *Pane) {
 	}
 	p.markClosed()
 	a.closeSFTPPane(p)
+	if a.fileTree != nil && a.fileTree.pane == p {
+		a.fileTree = nil
+	}
+	if a.remoteTree != nil && a.remoteTree.pane == p {
+		a.remoteTree = nil
+	}
 	if a.gitMenu.pane == p {
 		a.gitMenu = gitMenuState{}
 	}

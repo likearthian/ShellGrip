@@ -1,7 +1,7 @@
 {
   "name": "ShellGrip",
   "identifier": "dev.shellgrip.app",
-  "version": "0.6.0",
+  "version": "0.7.3",
   "copyright": "A native terminal workspace, forked from GoRex and built with MyGo",
   "out": "build",
   "buildCommand": "go run ./tools/mkwslwatch",

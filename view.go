@@ -70,8 +70,12 @@ func (a *App) view(c *ui.Context) {
 	a.aboutDialog(c, k)
 	a.gitPromptDialog(c, k)
 	a.gitAuthDialog(c, k)
-	if a.saveDue && time.Since(a.lastSave) > time.Second {
-		a.save()
+	if a.saveDue {
+		if wait := time.Second - time.Since(a.lastSave); wait <= 0 {
+			a.save()
+		} else {
+			c.After(wait)
+		}
 	}
 	// The window's title, which the Window menu and Mission Control show,
 	// is the active tab's.
